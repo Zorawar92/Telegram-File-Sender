@@ -1,8 +1,11 @@
 import { Feather } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as BackgroundTask from 'expo-background-task';
 import * as DocumentPicker from 'expo-document-picker';
+import { Directory, File as ExpoFile } from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
 import * as SecureStore from 'expo-secure-store';
+import * as TaskManager from 'expo-task-manager';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
@@ -11,6 +14,7 @@ import {
   Platform,
   Pressable,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -21,6 +25,9 @@ import { useColors } from '@/hooks/useColors';
 
 const TOKEN_KEY = 'telegram-file-sender.bot-token';
 const CHAT_ID_KEY = 'telegram-file-sender.chat-id';
+const AUTOMATION_KEY = 'telegram-file-sender.folder-automation';
+const FOLDER_TASK_NAME = 'telegram-file-sender.folder-sync';
+const INTERVAL_OPTIONS = [15, 30, 60] as const;
 
 type SelectedFile = {
   name: string;
@@ -28,6 +35,19 @@ type SelectedFile = {
   size?: number;
   mimeType?: string;
 };
+
+type FolderAutomation = {
+  enabled: boolean;
+  directoryUri: string;
+  directoryName: string;
+  intervalMinutes: number;
+  uploaded: Record<string, number>;
+  lastScanAt?: string;
+  lastUploadedCount?: number;
+  lastError?: string;
+};
+
+type UploadableFile = SelectedFile | ExpoFile;
 
 type Notice = {
   tone: 'success' | 'error' | 'info';
@@ -58,10 +78,29 @@ async function writeSetting(key: string, value: string) {
   return SecureStore.setItemAsync(key, value);
 }
 
+async function getFolderAutomation() {
+  const raw = await readSetting(AUTOMATION_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as FolderAutomation;
+  } catch {
+    return null;
+  }
+}
+
+function getFileType(file: UploadableFile) {
+  if (file instanceof ExpoFile) return file.type || 'application/octet-stream';
+  return file.mimeType || 'application/octet-stream';
+}
+
+function getFileName(file: UploadableFile) {
+  return file instanceof ExpoFile ? file.name : file.name || 'file';
+}
+
 function uploadDocument(
   botToken: string,
   chatId: string,
-  file: SelectedFile,
+  file: UploadableFile,
   onProgress: (progress: number) => void,
 ) {
   return new Promise<void>((resolve, reject) => {
@@ -69,11 +108,13 @@ function uploadDocument(
     formData.append('chat_id', chatId);
     formData.append(
       'document',
-      {
-        uri: file.uri,
-        name: file.name || 'file',
-        type: file.mimeType || 'application/octet-stream',
-      } as unknown as Blob,
+      file instanceof ExpoFile
+        ? (file as unknown as Blob)
+        : ({
+            uri: file.uri,
+            name: getFileName(file),
+            type: getFileType(file),
+          } as unknown as Blob),
     );
 
     const request = new XMLHttpRequest();
@@ -115,6 +156,67 @@ function uploadDocument(
   });
 }
 
+async function scanAndUploadFolder() {
+  const automation = await getFolderAutomation();
+  if (!automation?.enabled || !automation.directoryUri) return 0;
+
+  const botToken = await readSetting(TOKEN_KEY);
+  const chatId = await readSetting(CHAT_ID_KEY);
+  if (!botToken?.trim() || !chatId?.trim()) {
+    throw new Error('Add your bot token and chat ID before enabling automation.');
+  }
+
+  const directory = new Directory(automation.directoryUri);
+  const entries = directory.list();
+  const files = entries.filter(
+    (entry): entry is ExpoFile => entry instanceof ExpoFile,
+  );
+  const uploaded = { ...automation.uploaded };
+  let uploadedCount = 0;
+
+  for (const file of files) {
+    const fingerprint = `${file.uri}:${file.size}:${file.lastModified ?? ''}`;
+    if (uploaded[fingerprint]) continue;
+    await uploadDocument(botToken.trim(), chatId.trim(), file, () => {});
+    uploaded[fingerprint] = Date.now();
+    uploadedCount += 1;
+  }
+
+  await writeSetting(
+    AUTOMATION_KEY,
+    JSON.stringify({
+      ...automation,
+      uploaded: Object.fromEntries(Object.entries(uploaded).slice(-500)),
+      lastScanAt: new Date().toISOString(),
+      lastUploadedCount: uploadedCount,
+      lastError: undefined,
+    }),
+  );
+  return uploadedCount;
+}
+
+if (!TaskManager.isTaskDefined(FOLDER_TASK_NAME)) {
+  TaskManager.defineTask(FOLDER_TASK_NAME, async () => {
+    try {
+      await scanAndUploadFolder();
+      return BackgroundTask.BackgroundTaskResult.Success;
+    } catch (error) {
+      const automation = await getFolderAutomation();
+      if (automation) {
+        await writeSetting(
+          AUTOMATION_KEY,
+          JSON.stringify({
+            ...automation,
+            lastError:
+              error instanceof Error ? error.message : 'Automatic scan failed.',
+          }),
+        );
+      }
+      return BackgroundTask.BackgroundTaskResult.Failed;
+    }
+  });
+}
+
 export default function HomeScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -127,6 +229,8 @@ export default function HomeScreen() {
   const [progress, setProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [isCheckingBot, setIsCheckingBot] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [automation, setAutomation] = useState<FolderAutomation | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
 
@@ -135,11 +239,13 @@ export default function HomeScreen() {
     Promise.all([
       readSetting(TOKEN_KEY),
       readSetting(CHAT_ID_KEY),
+      getFolderAutomation(),
     ])
-      .then(([savedToken, savedChatId]) => {
+      .then(([savedToken, savedChatId, savedAutomation]) => {
         if (!mounted) return;
         setBotToken(savedToken ?? '');
         setChatId(savedChatId ?? '');
+        setAutomation(savedAutomation);
       })
       .catch(() => {
         if (mounted) {
@@ -162,6 +268,132 @@ export default function HomeScreen() {
       writeSetting(TOKEN_KEY, botToken.trim()),
       writeSetting(CHAT_ID_KEY, chatId.trim()),
     ]);
+  }
+
+  async function pickFolder() {
+    setNotice(null);
+    if (Platform.OS !== 'android') {
+      setNotice({
+        tone: 'info',
+        text: 'Folder automation is available in the installable Android build.',
+      });
+      return;
+    }
+    try {
+      const directory = await Directory.pickDirectoryAsync(
+        automation?.directoryUri,
+      );
+      const nextAutomation: FolderAutomation = {
+        enabled: false,
+        directoryUri: directory.uri,
+        directoryName: directory.name || 'Selected folder',
+        intervalMinutes: automation?.intervalMinutes ?? 15,
+        uploaded: automation?.uploaded ?? {},
+        lastScanAt: automation?.lastScanAt,
+        lastUploadedCount: automation?.lastUploadedCount,
+      };
+      setAutomation(nextAutomation);
+      await writeSetting(AUTOMATION_KEY, JSON.stringify(nextAutomation));
+      setNotice({
+        tone: 'success',
+        text: `Folder selected: ${nextAutomation.directoryName}.`,
+      });
+      await Haptics.selectionAsync();
+    } catch (error) {
+      if (error instanceof Error && error.message.toLowerCase().includes('cancel')) {
+        return;
+      }
+      setNotice({
+        tone: 'error',
+        text: 'The folder could not be selected. Please try again.',
+      });
+    }
+  }
+
+  async function setAutomationEnabled(enabled: boolean) {
+    setNotice(null);
+    if (Platform.OS !== 'android') {
+      setNotice({
+        tone: 'info',
+        text: 'Automatic folder checks require an installable Android build.',
+      });
+      return;
+    }
+    if (!automation?.directoryUri) {
+      setNotice({ tone: 'error', text: 'Choose a folder before enabling automation.' });
+      return;
+    }
+    if (!botToken.trim() || !chatId.trim()) {
+      setNotice({
+        tone: 'error',
+        text: 'Add your bot token and chat ID before enabling automation.',
+      });
+      return;
+    }
+
+    try {
+      await saveSettings();
+      if (enabled) {
+        const available = await TaskManager.isAvailableAsync();
+        if (!available) {
+          throw new Error(
+            'Background checks are unavailable here. Install the Android build instead of using Expo Go.',
+          );
+        }
+        if (await TaskManager.isTaskRegisteredAsync(FOLDER_TASK_NAME)) {
+          await BackgroundTask.unregisterTaskAsync(FOLDER_TASK_NAME);
+        }
+        await BackgroundTask.registerTaskAsync(FOLDER_TASK_NAME, {
+          minimumInterval: automation.intervalMinutes,
+        });
+      } else if (await TaskManager.isTaskRegisteredAsync(FOLDER_TASK_NAME)) {
+        await BackgroundTask.unregisterTaskAsync(FOLDER_TASK_NAME);
+      }
+      const nextAutomation = { ...automation, enabled };
+      setAutomation(nextAutomation);
+      await writeSetting(AUTOMATION_KEY, JSON.stringify(nextAutomation));
+      setNotice({
+        tone: 'success',
+        text: enabled
+          ? 'Automatic folder checks are enabled.'
+          : 'Automatic folder checks are paused.',
+      });
+    } catch (error) {
+      setNotice({
+        tone: 'error',
+        text:
+          error instanceof Error
+            ? error.message
+            : 'Could not update automatic folder checks.',
+      });
+    }
+  }
+
+  async function scanFolderNow() {
+    if (!automation?.directoryUri) {
+      setNotice({ tone: 'error', text: 'Choose a folder before scanning.' });
+      return;
+    }
+    setIsScanning(true);
+    setNotice(null);
+    try {
+      await saveSettings();
+      const count = await scanAndUploadFolder();
+      setAutomation(await getFolderAutomation());
+      setNotice({
+        tone: 'success',
+        text: count
+          ? `${count} new file${count === 1 ? '' : 's'} sent to Telegram.`
+          : 'No new files found in the selected folder.',
+      });
+    } catch (error) {
+      setNotice({
+        tone: 'error',
+        text: error instanceof Error ? error.message : 'The folder scan failed.',
+      });
+    } finally {
+      setIsScanning(false);
+    }
   }
 
   async function pickFile() {
@@ -360,6 +592,145 @@ export default function HomeScreen() {
             </Pressable>
           </View>
         ) : null}
+
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Folder automation</Text>
+          <Text style={styles.sectionHint}>Android only</Text>
+        </View>
+
+        <View style={styles.automationCard}>
+          <View style={styles.automationHeader}>
+            <View style={styles.automationIcon}>
+              <Feather name="refresh-cw" size={18} color={colors.primary} />
+            </View>
+            <View style={styles.automationCopy}>
+              <Text style={styles.automationTitle}>Watch for new files</Text>
+              <Text style={styles.automationText}>
+                The app checks one folder in the background and sends files it
+                has not sent before.
+              </Text>
+            </View>
+            <Switch
+              testID="automation-toggle"
+              value={automation?.enabled ?? false}
+              onValueChange={setAutomationEnabled}
+              disabled={Platform.OS !== 'android' || isScanning || !isReady}
+              trackColor={{ false: colors.muted, true: colors.accent }}
+              thumbColor={
+                automation?.enabled ? colors.primary : colors.mutedForeground
+              }
+            />
+          </View>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Choose folder to watch"
+            testID="choose-folder"
+            onPress={pickFolder}
+            disabled={isScanning || !isReady}
+            style={({ pressed }) => [
+              styles.folderButton,
+              pressed && styles.pressed,
+              isScanning && styles.disabled,
+            ]}
+          >
+            <Feather name="folder" size={16} color={colors.primary} />
+            <Text style={styles.folderButtonText} numberOfLines={1}>
+              {automation?.directoryName || 'Choose a folder to watch'}
+            </Text>
+            <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+          </Pressable>
+
+          <View style={styles.intervalRow}>
+            <Text style={styles.intervalLabel}>Check at least every</Text>
+            <View style={styles.intervalOptions}>
+              {INTERVAL_OPTIONS.map((minutes) => (
+                <Pressable
+                  key={minutes}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Check every ${minutes} minutes`}
+                  testID={`interval-${minutes}`}
+                  onPress={async () => {
+                    const nextAutomation: FolderAutomation = {
+                      enabled: automation?.enabled ?? false,
+                      directoryUri: automation?.directoryUri ?? '',
+                      directoryName: automation?.directoryName ?? '',
+                      intervalMinutes: minutes,
+                      uploaded: automation?.uploaded ?? {},
+                      lastScanAt: automation?.lastScanAt,
+                      lastUploadedCount: automation?.lastUploadedCount,
+                    };
+                    setAutomation(nextAutomation);
+                    await writeSetting(
+                      AUTOMATION_KEY,
+                      JSON.stringify(nextAutomation),
+                    );
+                    if (nextAutomation.enabled) {
+                      await setAutomationEnabled(true);
+                    }
+                  }}
+                  disabled={isScanning || !isReady}
+                  style={({ pressed }) => [
+                    styles.intervalOption,
+                    automation?.intervalMinutes === minutes &&
+                      styles.intervalOptionActive,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.intervalOptionText,
+                      automation?.intervalMinutes === minutes &&
+                        styles.intervalOptionTextActive,
+                    ]}
+                  >
+                    {minutes}m
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.automationFooter}>
+            <View style={styles.lastScanCopy}>
+              <Feather name="clock" size={14} color={colors.mutedForeground} />
+              <Text style={styles.lastScanText} numberOfLines={1}>
+                {automation?.lastScanAt
+                  ? `Last scan ${new Date(automation.lastScanAt).toLocaleString()}`
+                  : 'No folder scan yet'}
+              </Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Scan folder now"
+              testID="scan-folder"
+              onPress={scanFolderNow}
+              disabled={isScanning || !isReady}
+              style={({ pressed }) => [
+                styles.scanButton,
+                pressed && styles.pressed,
+                isScanning && styles.disabled,
+              ]}
+            >
+              {isScanning ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <Feather name="play" size={14} color={colors.primary} />
+              )}
+              <Text style={styles.scanButtonText}>
+                {isScanning ? 'Scanning…' : 'Scan now'}
+              </Text>
+            </Pressable>
+          </View>
+
+          {Platform.OS !== 'android' ? (
+            <Text style={styles.automationHint}>
+              Folder access and background checks become available in the
+              installable Android build. Expo Go and the browser preview keep
+              manual file sending available.
+            </Text>
+          ) : null}
+        </View>
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Destination</Text>
@@ -646,6 +1017,126 @@ function createStyles(colors: Palette) {
       alignItems: 'center',
       justifyContent: 'center',
       borderRadius: 12,
+    },
+    automationCard: {
+      padding: 16,
+      borderRadius: 20,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.border,
+      gap: 14,
+    },
+    automationHeader: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 11,
+    },
+    automationIcon: {
+      width: 40,
+      height: 40,
+      borderRadius: 13,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.secondary,
+    },
+    automationCopy: { flex: 1, gap: 4 },
+    automationTitle: {
+      color: colors.cardForeground,
+      fontSize: 14,
+      fontFamily: 'Inter_700Bold',
+    },
+    automationText: {
+      color: colors.mutedForeground,
+      fontSize: 11,
+      lineHeight: 16,
+      fontFamily: 'Inter_400Regular',
+    },
+    folderButton: {
+      minHeight: 46,
+      paddingHorizontal: 12,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 9,
+      borderRadius: 13,
+      backgroundColor: colors.background,
+      borderWidth: 1,
+      borderColor: colors.input,
+    },
+    folderButtonText: {
+      flex: 1,
+      color: colors.foreground,
+      fontSize: 12,
+      fontFamily: 'Inter_600SemiBold',
+    },
+    intervalRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+    },
+    intervalLabel: {
+      color: colors.mutedForeground,
+      fontSize: 11,
+      fontFamily: 'Inter_500Medium',
+    },
+    intervalOptions: { flexDirection: 'row', gap: 6 },
+    intervalOption: {
+      minWidth: 42,
+      minHeight: 32,
+      paddingHorizontal: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: 10,
+      backgroundColor: colors.muted,
+    },
+    intervalOptionActive: {
+      backgroundColor: colors.primary,
+    },
+    intervalOptionText: {
+      color: colors.mutedForeground,
+      fontSize: 11,
+      fontFamily: 'Inter_700Bold',
+    },
+    intervalOptionTextActive: {
+      color: colors.primaryForeground,
+    },
+    automationFooter: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    lastScanCopy: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    lastScanText: {
+      flex: 1,
+      color: colors.mutedForeground,
+      fontSize: 10,
+      fontFamily: 'Inter_400Regular',
+    },
+    scanButton: {
+      minHeight: 34,
+      paddingHorizontal: 10,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      borderRadius: 10,
+      backgroundColor: colors.secondary,
+    },
+    scanButtonText: {
+      color: colors.secondaryForeground,
+      fontSize: 11,
+      fontFamily: 'Inter_700Bold',
+    },
+    automationHint: {
+      color: colors.mutedForeground,
+      fontSize: 11,
+      lineHeight: 16,
+      fontFamily: 'Inter_400Regular',
     },
     sectionHeader: {
       flexDirection: 'row',

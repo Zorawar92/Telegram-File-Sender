@@ -9,8 +9,8 @@ Use SecureStore on iOS and Android, but provide an explicit browser fallback bec
 
 **How to apply:** Branch on `Platform.OS === 'web'` at the storage boundary; keep secrets out of source and persist native credentials in SecureStore.
 
-The direct client-side Telegram Bot API upload flow has been confirmed working on a physical phone through Expo Go, so a backend is not required for this app's first version.
+The direct client-side Telegram Bot API upload flow has been confirmed working on a physical phone through Expo Go, so a backend is not required for this app's first version. Android folder automation is a separate native/background capability and needs the installable Android build.
 
 **Why:** The user tested the completed app and reported that it works very well.
 
-**How to apply:** Preserve the direct phone-to-Telegram architecture unless a future requirement needs server-side processing, shared credentials, or background delivery.
+**How to apply:** Preserve the direct phone-to-Telegram architecture; use Android document-tree access plus system-controlled background tasks for folder automation, and do not promise exact scan times.
