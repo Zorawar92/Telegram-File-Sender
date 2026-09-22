@@ -32,8 +32,8 @@ _Populate as you build — non-obvious choices a reader couldn't infer from the 
 
 - Pick any file from the device.
 - Send it to a configured Telegram bot and chat with upload progress.
-- Select an Android folder and periodically upload files that have not been sent before.
-- Scan the selected folder manually or let Android run background checks at a system-controlled interval.
+- Select an Android folder and upload files that have not been sent before.
+- Scan the selected folder manually or schedule one low-power daily background check at a chosen 24-hour time.
 - Check the bot token before sending.
 - Keep bot token and chat ID on the device; use secure storage on native platforms and a web-only fallback for browser preview.
 
@@ -46,6 +46,7 @@ _Populate as you build — non-obvious choices a reader couldn't infer from the 
 - Telegram Bot API credentials are entered by the user on-device; never hardcode a bot token in source.
 - `expo-document-picker` is required for arbitrary file selection.
 - Folder automation needs the installable Android build; Expo Go does not provide Android background-task execution.
+- The daily time is a target rather than an exact alarm: Android may delay the OS-managed check to protect battery life.
 
 ## Pointers
 

@@ -27,7 +27,7 @@ const TOKEN_KEY = 'telegram-file-sender.bot-token';
 const CHAT_ID_KEY = 'telegram-file-sender.chat-id';
 const AUTOMATION_KEY = 'telegram-file-sender.folder-automation';
 const FOLDER_TASK_NAME = 'telegram-file-sender.folder-sync';
-const INTERVAL_OPTIONS = [15, 30, 60] as const;
+const BACKGROUND_CHECK_MINUTES = 15;
 
 type SelectedFile = {
   name: string;
@@ -41,9 +41,12 @@ type FolderAutomation = {
   directoryUri: string;
   directoryName: string;
   intervalMinutes: number;
+  scheduleHour?: number;
+  scheduleMinute?: number;
   uploaded: Record<string, number>;
   lastScanAt?: string;
   lastUploadedCount?: number;
+  lastScheduledDate?: string;
   lastError?: string;
 };
 
@@ -82,10 +85,46 @@ async function getFolderAutomation() {
   const raw = await readSetting(AUTOMATION_KEY);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as FolderAutomation;
+    const parsed = JSON.parse(raw) as FolderAutomation;
+    return {
+      ...parsed,
+      intervalMinutes: BACKGROUND_CHECK_MINUTES,
+      scheduleHour: parsed.scheduleHour ?? 3,
+      scheduleMinute: parsed.scheduleMinute ?? 0,
+    };
   } catch {
     return null;
   }
+}
+
+function formatScheduleTime(hour = 3, minute = 0) {
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function parseScheduleTime(value: string) {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value.trim());
+  if (!match) return null;
+  return {
+    hour: Number(match[1]),
+    minute: Number(match[2]),
+  };
+}
+
+function getLocalDateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function isScheduledScanDue(automation: FolderAutomation) {
+  const now = new Date();
+  const scheduleHour = automation.scheduleHour ?? 3;
+  const scheduleMinute = automation.scheduleMinute ?? 0;
+  const isAfterSchedule =
+    now.getHours() > scheduleHour ||
+    (now.getHours() === scheduleHour && now.getMinutes() >= scheduleMinute);
+  return (
+    isAfterSchedule &&
+    automation.lastScheduledDate !== getLocalDateKey(now)
+  );
 }
 
 function getFileType(file: UploadableFile) {
@@ -156,7 +195,7 @@ function uploadDocument(
   });
 }
 
-async function scanAndUploadFolder() {
+async function scanAndUploadFolder(markAsScheduled = false) {
   const automation = await getFolderAutomation();
   if (!automation?.enabled || !automation.directoryUri) return 0;
 
@@ -189,6 +228,9 @@ async function scanAndUploadFolder() {
       uploaded: Object.fromEntries(Object.entries(uploaded).slice(-500)),
       lastScanAt: new Date().toISOString(),
       lastUploadedCount: uploadedCount,
+      lastScheduledDate: markAsScheduled
+        ? getLocalDateKey(new Date())
+        : automation.lastScheduledDate,
       lastError: undefined,
     }),
   );
@@ -198,7 +240,10 @@ async function scanAndUploadFolder() {
 if (!TaskManager.isTaskDefined(FOLDER_TASK_NAME)) {
   TaskManager.defineTask(FOLDER_TASK_NAME, async () => {
     try {
-      await scanAndUploadFolder();
+      const automation = await getFolderAutomation();
+      if (automation && isScheduledScanDue(automation)) {
+        await scanAndUploadFolder(true);
+      }
       return BackgroundTask.BackgroundTaskResult.Success;
     } catch (error) {
       const automation = await getFolderAutomation();
@@ -231,6 +276,7 @@ export default function HomeScreen() {
   const [isCheckingBot, setIsCheckingBot] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [automation, setAutomation] = useState<FolderAutomation | null>(null);
+  const [scheduleTime, setScheduleTime] = useState('03:00');
   const [isReady, setIsReady] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
 
@@ -246,6 +292,12 @@ export default function HomeScreen() {
         setBotToken(savedToken ?? '');
         setChatId(savedChatId ?? '');
         setAutomation(savedAutomation);
+        setScheduleTime(
+          formatScheduleTime(
+            savedAutomation?.scheduleHour,
+            savedAutomation?.scheduleMinute,
+          ),
+        );
       })
       .catch(() => {
         if (mounted) {
@@ -287,12 +339,18 @@ export default function HomeScreen() {
         enabled: false,
         directoryUri: directory.uri,
         directoryName: directory.name || 'Selected folder',
-        intervalMinutes: automation?.intervalMinutes ?? 15,
+        intervalMinutes: BACKGROUND_CHECK_MINUTES,
+        scheduleHour: automation?.scheduleHour ?? 3,
+        scheduleMinute: automation?.scheduleMinute ?? 0,
         uploaded: automation?.uploaded ?? {},
         lastScanAt: automation?.lastScanAt,
         lastUploadedCount: automation?.lastUploadedCount,
+        lastScheduledDate: automation?.lastScheduledDate,
       };
       setAutomation(nextAutomation);
+      setScheduleTime(
+        formatScheduleTime(nextAutomation.scheduleHour, nextAutomation.scheduleMinute),
+      );
       await writeSetting(AUTOMATION_KEY, JSON.stringify(nextAutomation));
       setNotice({
         tone: 'success',
@@ -323,16 +381,30 @@ export default function HomeScreen() {
       setNotice({ tone: 'error', text: 'Choose a folder before enabling automation.' });
       return;
     }
-    if (!botToken.trim() || !chatId.trim()) {
+    if (enabled && (!botToken.trim() || !chatId.trim())) {
       setNotice({
         tone: 'error',
         text: 'Add your bot token and chat ID before enabling automation.',
       });
       return;
     }
+    const parsedSchedule = parseScheduleTime(scheduleTime);
+    if (enabled && !parsedSchedule) {
+      setNotice({
+        tone: 'error',
+        text: 'Choose a valid daily time in 24-hour format, such as 03:00.',
+      });
+      return;
+    }
 
     try {
       await saveSettings();
+      const scheduledAutomation: FolderAutomation = {
+        ...automation,
+        intervalMinutes: BACKGROUND_CHECK_MINUTES,
+        scheduleHour: parsedSchedule?.hour ?? automation.scheduleHour ?? 3,
+        scheduleMinute: parsedSchedule?.minute ?? automation.scheduleMinute ?? 0,
+      };
       if (enabled) {
         const available = await TaskManager.isAvailableAsync();
         if (!available) {
@@ -344,12 +416,12 @@ export default function HomeScreen() {
           await BackgroundTask.unregisterTaskAsync(FOLDER_TASK_NAME);
         }
         await BackgroundTask.registerTaskAsync(FOLDER_TASK_NAME, {
-          minimumInterval: automation.intervalMinutes,
+          minimumInterval: BACKGROUND_CHECK_MINUTES,
         });
       } else if (await TaskManager.isTaskRegisteredAsync(FOLDER_TASK_NAME)) {
         await BackgroundTask.unregisterTaskAsync(FOLDER_TASK_NAME);
       }
-      const nextAutomation = { ...automation, enabled };
+      const nextAutomation = { ...scheduledAutomation, enabled };
       setAutomation(nextAutomation);
       await writeSetting(AUTOMATION_KEY, JSON.stringify(nextAutomation));
       setNotice({
@@ -367,6 +439,19 @@ export default function HomeScreen() {
             : 'Could not update automatic folder checks.',
       });
     }
+  }
+
+  async function updateScheduleTime(value: string) {
+    setScheduleTime(value);
+    const parsedSchedule = parseScheduleTime(value);
+    if (!parsedSchedule || !automation) return;
+    const nextAutomation: FolderAutomation = {
+      ...automation,
+      scheduleHour: parsedSchedule.hour,
+      scheduleMinute: parsedSchedule.minute,
+    };
+    setAutomation(nextAutomation);
+    await writeSetting(AUTOMATION_KEY, JSON.stringify(nextAutomation));
   }
 
   async function scanFolderNow() {
@@ -641,54 +726,24 @@ export default function HomeScreen() {
             <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
           </Pressable>
 
-          <View style={styles.intervalRow}>
-            <Text style={styles.intervalLabel}>Check at least every</Text>
-            <View style={styles.intervalOptions}>
-              {INTERVAL_OPTIONS.map((minutes) => (
-                <Pressable
-                  key={minutes}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Check every ${minutes} minutes`}
-                  testID={`interval-${minutes}`}
-                  onPress={async () => {
-                    const nextAutomation: FolderAutomation = {
-                      enabled: automation?.enabled ?? false,
-                      directoryUri: automation?.directoryUri ?? '',
-                      directoryName: automation?.directoryName ?? '',
-                      intervalMinutes: minutes,
-                      uploaded: automation?.uploaded ?? {},
-                      lastScanAt: automation?.lastScanAt,
-                      lastUploadedCount: automation?.lastUploadedCount,
-                    };
-                    setAutomation(nextAutomation);
-                    await writeSetting(
-                      AUTOMATION_KEY,
-                      JSON.stringify(nextAutomation),
-                    );
-                    if (nextAutomation.enabled) {
-                      await setAutomationEnabled(true);
-                    }
-                  }}
-                  disabled={isScanning || !isReady}
-                  style={({ pressed }) => [
-                    styles.intervalOption,
-                    automation?.intervalMinutes === minutes &&
-                      styles.intervalOptionActive,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.intervalOptionText,
-                      automation?.intervalMinutes === minutes &&
-                        styles.intervalOptionTextActive,
-                    ]}
-                  >
-                    {minutes}m
-                  </Text>
-                </Pressable>
-              ))}
+          <View style={styles.scheduleRow}>
+            <View style={styles.scheduleCopy}>
+              <Text style={styles.intervalLabel}>Run once a day at</Text>
+              <Text style={styles.scheduleHint}>24-hour time</Text>
             </View>
+            <TextInput
+              testID="schedule-time-input"
+              value={scheduleTime}
+              onChangeText={updateScheduleTime}
+              placeholder="03:00"
+              placeholderTextColor={colors.mutedForeground}
+              keyboardType="numbers-and-punctuation"
+              maxLength={5}
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!isScanning && isReady}
+              style={styles.scheduleInput}
+            />
           </View>
 
           <View style={styles.automationFooter}>
@@ -723,13 +778,11 @@ export default function HomeScreen() {
             </Pressable>
           </View>
 
-          {Platform.OS !== 'android' ? (
-            <Text style={styles.automationHint}>
-              Folder access and background checks become available in the
-              installable Android build. Expo Go and the browser preview keep
-              manual file sending available.
-            </Text>
-          ) : null}
+          <Text style={styles.automationHint}>
+            {Platform.OS !== 'android'
+              ? 'Folder access and daily background checks become available in the installable Android build. Android decides the exact run time to protect battery life.'
+              : 'Android checks near this time once per day and only runs while it is scanning or uploading. It does not stay active all day.'}
+          </Text>
         </View>
 
         <View style={styles.sectionHeader}>
@@ -1067,6 +1120,31 @@ function createStyles(colors: Palette) {
       color: colors.foreground,
       fontSize: 12,
       fontFamily: 'Inter_600SemiBold',
+    },
+    scheduleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
+    scheduleCopy: { flex: 1, gap: 3 },
+    scheduleHint: {
+      color: colors.mutedForeground,
+      fontSize: 10,
+      fontFamily: 'Inter_400Regular',
+    },
+    scheduleInput: {
+      width: 78,
+      minHeight: 42,
+      paddingHorizontal: 10,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.input,
+      backgroundColor: colors.background,
+      color: colors.foreground,
+      textAlign: 'center',
+      fontSize: 15,
+      fontFamily: 'Inter_700Bold',
     },
     intervalRow: {
       flexDirection: 'row',
