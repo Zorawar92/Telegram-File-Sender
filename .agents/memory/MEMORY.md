@@ -1,0 +1,1 @@
+- [Mobile secure storage fallback](mobile-secure-storage.md) — native credentials use SecureStore; browser previews need a separate local-storage fallback.

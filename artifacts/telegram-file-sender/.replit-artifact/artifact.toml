@@ -1,0 +1,24 @@
+kind = "mobile"
+previewPath = "/telegram-file-sender/"
+title = "Telegram File Sender"
+description = "A private mobile utility that lets you pick or share any file and send it directly to a Telegram bot with upload progress and saved on-device settings."
+version = "1.0.0"
+id = "artifacts/telegram-file-sender"
+router = "expo-domain"
+
+[[services]]
+name = "expo"
+ensurePreviewReachable = "/status"
+paths = [ "/telegram-file-sender/" ]
+localPort = 25460
+
+[services.development]
+run = "pnpm --filter @workspace/telegram-file-sender run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/telegram-file-sender", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/telegram-file-sender", "run", "serve" ]
+
+[services.env]
+PORT = "25460"
+BASE_PATH = "/telegram-file-sender/"

@@ -1,6 +1,6 @@
-# [Project name]
+# Telegram File Sender
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A private Expo mobile app for choosing any file and sending it directly to a Telegram bot.
 
 ## Run & Operate
 
@@ -30,15 +30,19 @@ _Populate as you build — non-obvious choices a reader couldn't infer from the 
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- Pick any file from the device.
+- Send it to a configured Telegram bot and chat with upload progress.
+- Check the bot token before sending.
+- Keep bot token and chat ID on the device; use secure storage on native platforms and a web-only fallback for browser preview.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- The user wants a personal app that can send any file to a Telegram bot on their phone.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Telegram Bot API credentials are entered by the user on-device; never hardcode a bot token in source.
+- `expo-document-picker` is required for arbitrary file selection.
 
 ## Pointers
 
