@@ -1,15 +1,20 @@
 import { Feather } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Application from 'expo-application';
 import * as BackgroundTask from 'expo-background-task';
+import * as Battery from 'expo-battery';
 import * as DocumentPicker from 'expo-document-picker';
 import { Directory, File as ExpoFile } from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
+import * as IntentLauncher from 'expo-intent-launcher';
 import * as SecureStore from 'expo-secure-store';
+import { useIncomingShare } from 'expo-sharing';
 import * as TaskManager from 'expo-task-manager';
 import { StatusBar } from 'expo-status-bar';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   Keyboard,
   Platform,
   Pressable,
@@ -262,6 +267,50 @@ if (!TaskManager.isTaskDefined(FOLDER_TASK_NAME)) {
   });
 }
 
+function IncomingShareBridge({
+  onFileShared,
+}: {
+  onFileShared: (file: SelectedFile, multiple: boolean) => void;
+}) {
+  const {
+    resolvedSharedPayloads,
+    isResolving,
+    clearSharedPayloads,
+  } = useIncomingShare();
+
+  useEffect(() => {
+    if (isResolving || resolvedSharedPayloads.length === 0) return;
+    const shared = resolvedSharedPayloads.find(
+      (payload) => 'contentUri' in payload && Boolean(payload.contentUri),
+    );
+    if (!shared || !('contentUri' in shared) || !shared.contentUri) return;
+
+    let sharedName = shared.originalName || 'Shared file';
+    try {
+      sharedName = decodeURIComponent(sharedName);
+    } catch {
+      // Keep the original name if the provider returned an encoded value.
+    }
+    onFileShared(
+      {
+        name: sharedName,
+        uri: shared.contentUri,
+        size: shared.contentSize ?? undefined,
+        mimeType: shared.contentMimeType ?? shared.mimeType,
+      },
+      resolvedSharedPayloads.length > 1,
+    );
+    clearSharedPayloads();
+  }, [
+    clearSharedPayloads,
+    isResolving,
+    onFileShared,
+    resolvedSharedPayloads,
+  ]);
+
+  return null;
+}
+
 export default function HomeScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -277,8 +326,25 @@ export default function HomeScreen() {
   const [isScanning, setIsScanning] = useState(false);
   const [automation, setAutomation] = useState<FolderAutomation | null>(null);
   const [scheduleTime, setScheduleTime] = useState('03:00');
+  const [batteryOptimizationEnabled, setBatteryOptimizationEnabled] = useState<
+    boolean | null
+  >(null);
   const [isReady, setIsReady] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
+
+  async function refreshBatteryOptimization() {
+    if (Platform.OS !== 'android') {
+      setBatteryOptimizationEnabled(null);
+      return;
+    }
+    try {
+      setBatteryOptimizationEnabled(
+        await Battery.isBatteryOptimizationEnabledAsync(),
+      );
+    } catch {
+      setBatteryOptimizationEnabled(null);
+    }
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -315,11 +381,50 @@ export default function HomeScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    refreshBatteryOptimization();
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        refreshBatteryOptimization();
+      }
+    });
+    return () => subscription.remove();
+  }, []);
+
   async function saveSettings() {
     await Promise.all([
       writeSetting(TOKEN_KEY, botToken.trim()),
       writeSetting(CHAT_ID_KEY, chatId.trim()),
     ]);
+  }
+
+  async function openBatteryOptimizationSettings() {
+    if (Platform.OS !== 'android') return;
+    try {
+      if (Application.applicationId) {
+        await IntentLauncher.startActivityAsync(
+          IntentLauncher.ActivityAction.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+          { data: `package:${Application.applicationId}` },
+        );
+      } else {
+        await IntentLauncher.startActivityAsync(
+          IntentLauncher.ActivityAction.IGNORE_BATTERY_OPTIMIZATION_SETTINGS,
+        );
+      }
+    } catch {
+      try {
+        await IntentLauncher.startActivityAsync(
+          IntentLauncher.ActivityAction.IGNORE_BATTERY_OPTIMIZATION_SETTINGS,
+        );
+      } catch {
+        setNotice({
+          tone: 'error',
+          text: 'Battery settings could not be opened. Open this app’s battery settings manually.',
+        });
+      }
+    } finally {
+      await refreshBatteryOptimization();
+    }
   }
 
   async function pickFolder() {
@@ -589,8 +694,25 @@ export default function HomeScreen() {
     }
   }
 
+  const handleIncomingSharedFile = useCallback(
+    (sharedFile: SelectedFile, multiple: boolean) => {
+      setFile(sharedFile);
+      setProgress(0);
+      setNotice({
+        tone: 'info',
+        text: multiple
+          ? `${sharedFile.name} was shared. This app sends one file at a time.`
+          : `${sharedFile.name} is ready to send.`,
+      });
+    },
+    [],
+  );
+
   return (
     <View style={styles.root}>
+      {Platform.OS === 'android' ? (
+        <IncomingShareBridge onFileShared={handleIncomingSharedFile} />
+      ) : null}
       <StatusBar style={isDark ? 'light' : 'dark'} />
       <KeyboardAwareScrollViewCompat
         contentContainerStyle={[
@@ -784,6 +906,34 @@ export default function HomeScreen() {
               : 'Android checks near this time once per day and only runs while it is scanning or uploading. It does not stay active all day.'}
           </Text>
         </View>
+
+        {Platform.OS === 'android' && batteryOptimizationEnabled === true ? (
+          <View style={styles.batteryCard}>
+            <View style={styles.batteryIcon}>
+              <Feather name="battery-charging" size={17} color={colors.primary} />
+            </View>
+            <View style={styles.batteryCopy}>
+              <Text style={styles.batteryTitle}>Allow background uploads</Text>
+              <Text style={styles.batteryText}>
+                Android is still optimizing this app’s battery use. Allow
+                unrestricted battery use so the daily check can run. This
+                reminder disappears automatically after Android confirms it.
+              </Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Open battery optimization settings"
+              testID="battery-settings"
+              onPress={openBatteryOptimizationSettings}
+              style={({ pressed }) => [
+                styles.batteryButton,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Feather name="external-link" size={15} color={colors.primaryForeground} />
+            </Pressable>
+          </View>
+        ) : null}
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Destination</Text>
@@ -1215,6 +1365,44 @@ function createStyles(colors: Palette) {
       fontSize: 11,
       lineHeight: 16,
       fontFamily: 'Inter_400Regular',
+    },
+    batteryCard: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 10,
+      padding: 13,
+      borderRadius: 16,
+      backgroundColor: colors.accent,
+      borderWidth: 1,
+      borderColor: colors.success,
+    },
+    batteryIcon: {
+      width: 34,
+      height: 34,
+      borderRadius: 11,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.card,
+    },
+    batteryCopy: { flex: 1, gap: 4 },
+    batteryTitle: {
+      color: colors.cardForeground,
+      fontSize: 12,
+      fontFamily: 'Inter_700Bold',
+    },
+    batteryText: {
+      color: colors.mutedForeground,
+      fontSize: 11,
+      lineHeight: 16,
+      fontFamily: 'Inter_400Regular',
+    },
+    batteryButton: {
+      width: 34,
+      height: 34,
+      borderRadius: 11,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.primary,
     },
     sectionHeader: {
       flexDirection: 'row',
