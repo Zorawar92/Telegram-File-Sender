@@ -1,10 +1,21 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-  <!-- Sveglia esatta: su Android 12+ va concessa dall'utente (Impostazioni → Allarmi
-       e promemoria). Senza, l'app usa una sveglia approssimativa. -->
-  <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+  <!-- Sveglie esatte.
+       - Android 12/12L: SCHEDULE_EXACT_ALARM (concesso all'installazione fino ad Android 12L).
+       - Android 13+: USE_EXACT_ALARM, concesso automaticamente e non revocabile: la sveglia
+         non può essere spenta dal sistema o dall'utente senza disinstallare l'app.
+       Solo una delle due va usata per versione, da qui il maxSdkVersion. -->
+  <uses-permission
+    android:name="android.permission.SCHEDULE_EXACT_ALARM"
+    android:maxSdkVersion="32" />
+  <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+
   <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
   <uses-permission android:name="android.permission.WAKE_LOCK" />
+  <!-- Foreground service "dataSync": esegue il backup quando arriva la sveglia,
+       così il lavoro non viene rimandato come accade con WorkManager. -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
   <application>
     <!-- Riceve la sveglia quotidiana e fa partire il controllo della cartella. -->
@@ -24,8 +35,17 @@
         <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
         <action android:name="android.intent.action.TIME_SET" />
         <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+        <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
         <action android:name="android.intent.action.QUICKBOOT_POWERON" />
       </intent-filter>
     </receiver>
+
+    <!-- Esegue il backup con l'app chiusa; parte dalla sveglia. -->
+    <service
+      android:name="expo.modules.alarmbackup.BackupRunService"
+      android:enabled="true"
+      android:exported="false"
+      android:foregroundServiceType="dataSync"
+      android:stopWithTask="false" />
   </application>
 </manifest>

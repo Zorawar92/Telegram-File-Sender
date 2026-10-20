@@ -35,11 +35,16 @@ import { IncomingShareBridge, SharedFile } from './src/IncomingShareBridge';
 import {
   AlarmInfo,
   describeAlarm,
+  describeAlarmSource,
+  describeStandbyBucket,
   formatAlarmMoment,
   formatAlarmTimestamp,
   getAlarmInfo,
   isAlarmBackupAvailable,
+  isBackgroundLimited,
+  openAppSettings,
   openExactAlarmSettings,
+  scheduleTestAlarm,
   syncAlarmWithState,
 } from './src/alarm';
 import {
@@ -287,6 +292,41 @@ function HomeScreen() {
     setNotice({
       tone: 'info',
       text: 'Attiva «Consenti allarmi e promemoria» per Telegram File Sender, poi torna qui: la sveglia si aggiorna da sola.',
+    });
+  }
+
+  /**
+   * Sveglia di prova tra un minuto: verifica subito che il telefono svegli davvero
+   * l'app (sveglia → servizio → controllo della cartella), senza aspettare l'orario.
+   */
+  async function openSystemAppSettings() {
+    if (!openAppSettings()) {
+      setNotice({
+        tone: 'error',
+        text: 'Non riesco ad aprire le impostazioni: cerca «Telegram File Sender» in Impostazioni → App.',
+      });
+      return;
+    }
+    setNotice({
+      tone: 'info',
+      text: 'Nelle impostazioni dell’app: Batteria → «Senza limiti». Su Samsung anche Impostazioni → Batteria → Limiti di utilizzo in background → «App non in sospensione».',
+    });
+  }
+
+  function scheduleTestBackup() {
+    const info = scheduleTestAlarm(1);
+    setAlarmInfo(info);
+    if (!info) {
+      setNotice({
+        tone: 'error',
+        text: 'Modulo sveglia non disponibile in questa build: serve l’APK Android.',
+      });
+      return;
+    }
+    setShowDiagnostics(true);
+    setNotice({
+      tone: 'info',
+      text: 'Sveglia di prova tra 1 minuto. Chiudi l’app (senza forzare l’arresto) e blocca lo schermo: tra poco ricontrolla qui «Ultimo risveglio della sveglia».',
     });
   }
 
@@ -916,10 +956,10 @@ function HomeScreen() {
           </View>
 
           <Text style={styles.automationHint}>
-            All’orario scelto Android sveglia l’app con una sveglia di sistema, anche a telefono
-            fermo. In più il controllo viene recuperato all’apertura dell’app se il sistema lo
-            salta. Concedi «Allarmi e promemoria» e togli l’ottimizzazione batteria per la
-            massima puntualità.
+            All’orario scelto Android sveglia l’app con una sveglia «da orologio» e il backup parte
+            da solo, anche con l’app chiusa e il telefono fermo. Su Samsung, perché funzioni sempre,
+            metti l’app tra quelle «non in sospensione» e senza limiti di batteria (l’icona della
+            sveglia nella barra di stato indica che è armata).
           </Text>
 
           <Pressable
@@ -944,7 +984,13 @@ function HomeScreen() {
                 Sveglia di sistema:{' '}
                 {alarmInfo
                   ? alarmInfo.scheduled
-                    ? `${formatAlarmMoment(alarmInfo.nextTriggerAt)} (${alarmInfo.exact ? 'esatta' : 'approssimativa'})`
+                    ? `${formatAlarmMoment(alarmInfo.nextTriggerAt)} (${
+                        alarmInfo.alarmClock
+                          ? 'da orologio, esatta'
+                          : alarmInfo.exact
+                            ? 'esatta'
+                            : 'approssimativa'
+                      })`
                     : 'non programmata'
                   : 'modulo non disponibile'}
               </Text>
@@ -952,8 +998,19 @@ function HomeScreen() {
                 Allarmi esatti consentiti: {alarmInfo?.canScheduleExact ? 'sì' : 'no'}
               </Text>
               <Text style={extra.diagLine}>
+                Ottimizzazione batteria: {alarmInfo?.batteryOptimized ? 'attiva (da togliere)' : 'esente (ok)'}
+              </Text>
+              <Text style={extra.diagLine}>
+                Sospensione app: {describeStandbyBucket(alarmInfo?.standbyBucket)}
+              </Text>
+              {alarmInfo?.testScheduledAt ? (
+                <Text style={extra.diagLine}>
+                  Sveglia di prova: {formatAlarmMoment(alarmInfo.testScheduledAt)}
+                </Text>
+              ) : null}
+              <Text style={extra.diagLine}>
                 Ultimo risveglio della sveglia: {formatAlarmTimestamp(alarmInfo?.lastFiredAt ?? null)}
-                {alarmInfo?.lastSource ? ` (${alarmInfo.lastSource === 'boot' ? 'riavvio' : 'sveglia'})` : ''}
+                {alarmInfo?.lastSource ? ` (${describeAlarmSource(alarmInfo.lastSource)})` : ''}
               </Text>
               <Text style={extra.diagLine}>
                 Esito ultimo risveglio: {alarmInfo?.lastRunResult || '—'}
@@ -988,6 +1045,15 @@ function HomeScreen() {
                   <Text style={extra.fixButtonText}>Riprogramma la sveglia</Text>
                 </Pressable>
               ) : null}
+              <Pressable
+                accessibilityRole="button"
+                testID="test-alarm"
+                onPress={scheduleTestBackup}
+                style={({ pressed }) => [extra.fixButton, pressed && styles.pressed]}
+              >
+                <Feather name="bell" size={13} color={colors.primary} />
+                <Text style={extra.fixButtonText}>Prova la sveglia tra 1 minuto</Text>
+              </Pressable>
               <Pressable
                 accessibilityRole="button"
                 onPress={resetSentHistory}
@@ -1042,6 +1108,32 @@ function HomeScreen() {
               accessibilityLabel="Apri le impostazioni batteria"
               testID="battery-settings"
               onPress={openBatteryOptimizationSettings}
+              style={({ pressed }) => [styles.batteryButton, pressed && styles.pressed]}
+            >
+              <Feather name="external-link" size={15} color={colors.primaryForeground} />
+            </Pressable>
+          </View>
+        ) : null}
+
+        {Platform.OS === 'android' && folderState.enabled && isBackgroundLimited(alarmInfo) ? (
+          <View style={styles.batteryCard}>
+            <View style={styles.batteryIcon}>
+              <Feather name="moon" size={17} color={colors.warning} />
+            </View>
+            <View style={styles.batteryCopy}>
+              <Text style={styles.batteryTitle}>Samsung: escludi l’app dalla sospensione</Text>
+              <Text style={styles.batteryText}>
+                Il telefono sta trattando l’app come «poco usata» e può rimandare il backup.
+                Impostazioni → Batteria → Limiti di utilizzo in background: togli Telegram File
+                Sender da «App in sospensione» e aggiungila a «App non in sospensione». Controlla
+                anche Batteria dell’app su «Senza limiti».
+              </Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Apri le impostazioni dell'app"
+              testID="app-settings"
+              onPress={openSystemAppSettings}
               style={({ pressed }) => [styles.batteryButton, pressed && styles.pressed]}
             >
               <Feather name="external-link" size={15} color={colors.primaryForeground} />

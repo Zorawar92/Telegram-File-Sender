@@ -70,6 +70,20 @@ L'APK è firmato con la **keystore di debug** generata da Expo: va benissimo per
 (Android chiederà di autorizzare l'installazione da origini sconosciute). Per pubblicarla sul Play
 Store serve una keystore di release propria.
 
+### Permessi
+
+| Permesso | Perché |
+|---|---|
+| `USE_EXACT_ALARM` (13+) / `SCHEDULE_EXACT_ALARM` (12–12L) | sveglia all'ora esatta; è l'unico "speciale" e su Android 13+ è concesso all'installazione |
+| `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_DATA_SYNC` | eseguire il backup dal servizio avviato dalla sveglia |
+| `RECEIVE_BOOT_COMPLETED` | ricreare la sveglia dopo un riavvio |
+| `WAKE_LOCK` | tenere sveglio il telefono durante l'invio |
+| `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | aprire la schermata per togliere l'ottimizzazione (opzionale) |
+
+> `USE_EXACT_ALARM` è un permesso "ristretto" per il Play Store (riservato a sveglie/calendari):
+> qui va benissimo perché l'APK si installa a mano. Se un giorno pubblicassi l'app sul Play Store,
+> tieni solo `SCHEDULE_EXACT_ALARM` e lascia che sia l'utente a concederlo.
+
 ### Build automatica con GitHub Actions
 
 `.github/workflows/build-apk.yml`: parte a mano (*Actions → Run workflow*), a ogni push su `main`
@@ -106,7 +120,7 @@ src/telegram.ts              Bot API: getMe/getChat/sendMessage + upload multipa
 src/folderSync.ts            scansione cartella, deduplica, salvataggio stato dopo ogni file
 src/backgroundTasks.ts       task WorkManager + registrazione/rimozione
 src/alarm.ts                 ponte JS della sveglia di sistema (stato, permessi, formattazione)
-modules/alarm-backup/        modulo nativo: AlarmManager, receiver, worker del backup
+modules/alarm-backup/        modulo nativo: sveglia AlarmManager, foreground service, receiver
 src/storage.ts               SecureStore (token, Chat ID) e file di stato JSON
 src/IncomingShareBridge.tsx  ricezione file dal menu "Condividi" di Android
 src/styles.ts                stili della schermata
@@ -139,13 +153,17 @@ errore HTTP, così l'app può dire *perché* Telegram ha rifiutato il file.
 ### Perché una sveglia di sistema e non solo WorkManager
 
 `expo-background-task` (e quindi WorkManager) è pensato per lavori *best effort*: il sistema
-può rimandarli di ore, e con l'app chiusa alcuni produttori li bloccano del tutto. Per un backup
-"ogni giorno alle 21" servono invece due garanzie che solo `AlarmManager` offre:
+può rimandarli di ore e, con l'app chiusa, alcuni produttori (Samsung in primis) li bloccano
+del tutto finché non usi il telefono. Per un backup "ogni giorno alle 21" servono invece tre
+garanzie che solo `AlarmManager` offre:
 
-- **ora precisa**: `setExactAndAllowWhileIdle` viene consegnata anche in Doze (con il permesso
-  *Allarmi e promemoria*); WorkManager non promette alcun orario;
-- **nessuna dipendenza dall'app in esecuzione**: la sveglia sveglia il processo solo quando serve,
-  poi il lavoro pesante (lettura cartella, upload) gira in un `WorkManager` con vincolo di rete.
+- **ora precisa**: `setAlarmClock` (l'API delle sveglie della sveglia dell'orologio) non viene
+  spostata dal sistema ed esce dal risparmio energetico per essere consegnata;
+- **visibilità**: l'icona della sveglia nella barra di stato dice che è armata;
+- **un foreground service avviabile da background**: l'allarme può avviare un servizio
+  (`dataSync`) anche con l'app chiusa, cosa che un normale lavoro in background non può fare
+  su Android 12+. Il servizio tiene un wakelock e resta vivo finché il controllo non è finito,
+  invece di sperare che WorkManager decida di eseguirlo.
 
 Il task periodico di `expo-background-task` resta come rete di sicurezza, ma non è più l'unica
 speranza che il backup parta.
@@ -153,15 +171,19 @@ speranza che il backup parta.
 ### Come funziona il backup automatico
 
 1. **Sveglia di sistema** (`modules/alarm-backup`): all'orario scelto
-   `AlarmManager.setExactAndAllowWhileIdle` sveglia il telefono — anche in Doze, anche con l'app
-   chiusa — e fa partire il controllo. Con il permesso *Allarmi e promemoria* la sveglia è
-   esatta; senza, Android usa una sveglia approssimativa (l'app mostra come ottenerlo).
-2. La sveglia accoda un lavoro `WorkManager` che avvia l'app in **headless** ed esegue il task JS
-   registrato con `expo-background-task`: il processo resta vivo per tutta la durata dell'invio e,
-   se la rete manca in quel momento, il lavoro aspetta che torni.
-3. Subito dopo il risveglio la sveglia viene riprogrammata per il **giorno successivo**, quindi un
-   errore non spegne i controlli futuri. Dopo un riavvio (o un aggiornamento) la sveglia viene
-   ricreata da un receiver `BOOT_COMPLETED` / `MY_PACKAGE_REPLACED`.
+   `AlarmManager.setAlarmClock` sveglia il telefono — anche in Doze, anche con l'app chiusa.
+   Il permesso `USE_EXACT_ALARM` (Android 13+) è concesso all'installazione, quindi la sveglia
+   non dipende da un'autorizzazione da attivare a mano; senza permesso l'app ripiega su una
+   sveglia approssimativa e lo dice nella Diagnostica.
+2. Il receiver dell'allarme avvia **direttamente** un foreground service `dataSync`
+   (`BackupRunService`): prende un wakelock, avvia l'app in **headless** ed esegue il task JS
+   registrato con `expo-background-task`. Così il lavoro parte subito, senza aspettare che
+   WorkManager decida di eseguirlo. Se il servizio non è avviabile (o il controllo fallisce)
+   subentra WorkManager come ripiego.
+3. Subito dopo il risveglio la sveglia viene riprogrammata per il **giorno successivo**, e viene
+   armato un **controllo di recupero due ore dopo** (se il primo risveglio è andato perso, il
+   secondo recupera il giro; se il backup è già stato fatto non fa nulla). Dopo un riavvio, un
+   aggiornamento o la concessione del permesso la sveglia viene ricreata da un receiver.
 4. Il task esegue l'invio **solo se** il backup è attivo, l'orario giornaliero è passato e il
    giorno non è già stato coperto.
 5. Restano attive due reti di sicurezza: `expo-background-task` (WorkManager, ~ogni 15 minuti) e
@@ -173,10 +195,13 @@ speranza che il backup parta.
 ## Limiti noti
 
 - **50 MB per file**: limite del Bot API di Telegram (non aggirabile lato app).
-- Senza il permesso **Allarmi e promemoria** (Android 12+) o con l'**ottimizzazione batteria**
-  attiva, il produttore può ritardare la sveglia: per questo esistono il recupero all'apertura e il
-  task WorkManager. Su Xiaomi/Huawei/Oppo/Vivo conviene anche attivare l'avvio automatico (vedi
-  [GUIDA.md](GUIDA.md)).
+- **Samsung (One UI)**: se l'app finisce tra quelle «in sospensione» o con batteria limitata,
+  il telefono può spegnere le sveglie. Vanno tolte entrambe le limitazioni (la Diagnostica mostra
+  il bucket di standby e l'app fa comparire una scheda con le istruzioni). Vale lo stesso per
+  Xiaomi/Huawei/Oppo/Vivo con l'«avvio automatico».
+- Con l'**ottimizzazione batteria** attiva il produttore può comunque ritardare il risveglio: per
+  questo esistono il controllo di recupero due ore dopo, il task WorkManager e il recupero
+  all'apertura dell'app.
 - Un **arresto forzato** dalle impostazioni Android cancella le sveglie: tornano alla prossima
   apertura dell'app o al riavvio del telefono.
 - Vengono controllati i file al **primo livello** della cartella scelta (non le sottocartelle).

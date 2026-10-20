@@ -12,8 +12,10 @@ export {
   cancelDailyAlarm,
   getAlarmInfo,
   isAlarmBackupAvailable,
+  openAppSettings,
   openExactAlarmSettings,
   scheduleDailyAlarm,
+  scheduleTestAlarm,
 } from '../modules/alarm-backup';
 
 /**
@@ -73,4 +75,51 @@ export function describeAlarm(info: AlarmInfo | null, enabled: boolean, availabl
   if (!info) return 'stato sveglia non leggibile';
   if (!info.scheduled) return 'sveglia non impostata: riattiva l’interruttore';
   return `${formatAlarmMoment(info.nextTriggerAt)} (${info.exact ? 'esatta' : 'approssimativa'})`;
+}
+
+/**
+ * Bucket di standby di Android: da `rara` in giù il sistema (e Samsung) rimanda
+ * i lavori in background, quindi il backup può slittare anche con la sveglia armata.
+ */
+/** true se Android (o Samsung) sta limitando l'app in background. */
+export function isBackgroundLimited(info: AlarmInfo | null): boolean {
+  if (!info) return false;
+  return info.batteryOptimized || ['rara', 'limitata', 'mai'].includes(info.standbyBucket);
+}
+
+export function describeStandbyBucket(bucket: string | null | undefined): string {
+  switch (bucket) {
+    case 'attiva':
+    case 'in uso':
+      return `${bucket} (ok)`;
+    case 'frequente':
+      return 'frequente (ok)';
+    case 'rara':
+      return 'rara — Android rimanda i lavori: togli l’app dalla sospensione';
+    case 'limitata':
+      return 'limitata — l’app è bloccata dal sistema: escludila dalla sospensione';
+    case 'mai':
+      return 'mai — l’app è in sospensione profonda: escludila subito';
+    case undefined:
+    case null:
+      return 'non disponibile';
+    default:
+      return bucket;
+  }
+}
+
+/** Da dove è arrivato l'ultimo risveglio, in italiano. */
+export function describeAlarmSource(source: string | null | undefined): string {
+  switch (source) {
+    case 'alarm':
+      return 'sveglia';
+    case 'retry':
+      return 'controllo di recupero';
+    case 'test':
+      return 'sveglia di prova';
+    case 'boot':
+      return 'riavvio';
+    default:
+      return source ? source : 'sconosciuta';
+  }
 }

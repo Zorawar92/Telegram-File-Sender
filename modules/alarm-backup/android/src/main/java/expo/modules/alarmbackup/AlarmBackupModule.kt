@@ -35,6 +35,19 @@ class AlarmBackupModule : Module() {
       AlarmScheduler.cancel(context)
     }
 
+    /**
+     * Sveglia di prova tra `minutes` minuti: serve a verificare subito che il
+     * telefono svegli davvero l'app, senza aspettare l'orario impostato.
+     */
+    Function("scheduleTestAlarm") { minutes: Int ->
+      AlarmScheduler.scheduleTest(context, minutes)
+    }
+
+    /** Apre la scheda dell'app nelle impostazioni (Su Samsung: batteria, sospensione). */
+    Function("openAppSettings") {
+      startFirstAvailable(context, listOf(appDetailsIntent(context)))
+    }
+
     /** Stato completo: prossimo risveglio, permessi, ultimo esito. */
     Function("getAlarmInfo") {
       AlarmScheduler.info(context)
