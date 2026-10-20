@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - "arena/71fedada-telegram-file-sender"
+      - "main"
     tags:
       - "v*"
 
