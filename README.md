@@ -131,6 +131,20 @@ Funziona con `file://` (document picker) **e** `content://` (cartelle scelte con
 cosa che `FormData` + `XMLHttpRequest` non garantiva. La risposta viene letta anche in caso di
 errore HTTP, così l'app può dire *perché* Telegram ha rifiutato il file.
 
+### Perché una sveglia di sistema e non solo WorkManager
+
+`expo-background-task` (e quindi WorkManager) è pensato per lavori *best effort*: il sistema
+può rimandarli di ore, e con l'app chiusa alcuni produttori li bloccano del tutto. Per un backup
+"ogni giorno alle 21" servono invece due garanzie che solo `AlarmManager` offre:
+
+- **ora precisa**: `setExactAndAllowWhileIdle` viene consegnata anche in Doze (con il permesso
+  *Allarmi e promemoria*); WorkManager non promette alcun orario;
+- **nessuna dipendenza dall'app in esecuzione**: la sveglia sveglia il processo solo quando serve,
+  poi il lavoro pesante (lettura cartella, upload) gira in un `WorkManager` con vincolo di rete.
+
+Il task periodico di `expo-background-task` resta come rete di sicurezza, ma non è più l'unica
+speranza che il backup parta.
+
 ### Come funziona il backup automatico
 
 1. **Sveglia di sistema** (`modules/alarm-backup`): all'orario scelto
