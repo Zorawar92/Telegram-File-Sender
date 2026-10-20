@@ -18,7 +18,7 @@ Chat ID restano nella memoria protetta del dispositivo.
 | Problema segnalato | Causa | Soluzione |
 |---|---|---|
 | "Scan manuale" e file della cartella mai inviati, errore tipo *non si connette al bot* | il `File` di `expo-file-system` veniva passato a `FormData` come se fosse un blob: React Native accetta solo `{ uri, name, type }`, quindi la richiesta partiva senza allegato | invio riscritto con l'upload **nativo** `File.upload(...)` (multipart, `chat_id`, progresso, risposta JSON letta) |
-| Backup automatico che non parte | stato salvato solo a fine scansione, task definito dentro la schermata, nessun recupero se Android saltava il risveglio | stato salvato **dopo ogni file**, task definito in `index.js`, recupero all'apertura dell'app e ogni minuto in primo piano |
+| Backup automatico che non parte | stato salvato solo a fine scansione, task definito dentro la schermata, nessun recupero se Android saltava il risveglio; e soprattutto WorkManager, che non garantisce l'ora | stato salvato **dopo ogni file**, task definito in `index.js`, **sveglia di sistema `AlarmManager`** all'orario scelto (parte anche a telefono fermo), riprogrammazione dopo il riavvio, recupero all'apertura e ogni minuto in primo piano |
 | File singoli ok ma `getMe` inutile per capire l'errore | la verifica controllava solo il token | **Verifica bot e chat** (`getMe` + `getChat`) e **Messaggio di prova** |
 | Nessuna visibilità su cosa succede | nessun log/errore salvato | scheda **Diagnostica** con esito, errori, file in memoria e reset |
 
@@ -75,8 +75,9 @@ l'APK arm64-v8a e lo allega alla release.
 
 1. Copia `app-release.apk` sul telefono (cavo, Google Drive, Telegram stesso…).
 2. Aprilo dal file manager → *Installa* → concedi "Installa app sconosciute" al file manager.
-3. Al primo avvio: **concedi l'uso illimitato della batteria** se compare l'avviso in app
-   (serve al backup automatico).
+3. Al primo avvio: se compare la scheda **«Consenti la sveglia esatta»** toccala e attiva
+   *Allarmi e promemoria* (serve al backup automatico puntuale); se compare la scheda
+   **«Consenti i controlli in background»** concedi l'uso illimitato della batteria.
 
 ## Come si usa
 
@@ -99,6 +100,8 @@ App.tsx                      schermata unica: stato, azioni, diagnostica, footer
 src/telegram.ts              Bot API: getMe/getChat/sendMessage + upload multipart con retry
 src/folderSync.ts            scansione cartella, deduplica, salvataggio stato dopo ogni file
 src/backgroundTasks.ts       task WorkManager + registrazione/rimozione
+src/alarm.ts                 ponte JS della sveglia di sistema (stato, permessi, formattazione)
+modules/alarm-backup/        modulo nativo: AlarmManager, receiver, worker del backup
 src/storage.ts               SecureStore (token, Chat ID) e file di stato JSON
 src/IncomingShareBridge.tsx  ricezione file dal menu "Condividi" di Android
 src/styles.ts                stili della schermata
@@ -106,6 +109,11 @@ src/colors.ts, useColors.ts  palette chiaro/scuro
 assets/images/               icone dell'app
 android/                     progetto nativo generato da `expo prebuild` (versionato)
 ```
+
+> `package.json` contiene `expo.autolinking.buildFromSource: ["expo-background-task"]`:
+> il modulo della sveglia riusa `BackgroundTaskScheduler` di `expo-background-task`, quindi quel
+> pacchetto deve essere compilato dai sorgenti (non dall'AAR precompilato). Se un giorno cambi
+> SDK, lascia quella voce.
 
 ### Come funziona l'invio
 
@@ -125,20 +133,33 @@ errore HTTP, così l'app può dire *perché* Telegram ha rifiutato il file.
 
 ### Come funziona il backup automatico
 
-1. `expo-background-task` (WorkManager) sveglia l'app circa ogni **15 minuti**.
-2. Il task esegue l'invio **solo se** il backup è attivo, l'orario giornaliero è passato e il giorno
-   non è già stato coperto.
-3. Lo stesso controllo viene eseguito **all'apertura dell'app**, al ritorno in primo piano e ogni
-   minuto mentre l'app è aperta: se Android ha saltato il risveglio, l'app recupera.
-4. Ogni file inviato viene registrato subito (`uri|dimensione|data`), quindi i file nuovi partono
+1. **Sveglia di sistema** (`modules/alarm-backup`): all'orario scelto
+   `AlarmManager.setExactAndAllowWhileIdle` sveglia il telefono — anche in Doze, anche con l'app
+   chiusa — e fa partire il controllo. Con il permesso *Allarmi e promemoria* la sveglia è
+   esatta; senza, Android usa una sveglia approssimativa (l'app mostra come ottenerlo).
+2. La sveglia accoda un lavoro `WorkManager` che avvia l'app in **headless** ed esegue il task JS
+   registrato con `expo-background-task`: il processo resta vivo per tutta la durata dell'invio e,
+   se la rete manca in quel momento, il lavoro aspetta che torni.
+3. Subito dopo il risveglio la sveglia viene riprogrammata per il **giorno successivo**, quindi un
+   errore non spegne i controlli futuri. Dopo un riavvio (o un aggiornamento) la sveglia viene
+   ricreata da un receiver `BOOT_COMPLETED` / `MY_PACKAGE_REPLACED`.
+4. Il task esegue l'invio **solo se** il backup è attivo, l'orario giornaliero è passato e il
+   giorno non è già stato coperto.
+5. Restano attive due reti di sicurezza: `expo-background-task` (WorkManager, ~ogni 15 minuti) e
+   il controllo **all'apertura dell'app**, al ritorno in primo piano e ogni minuto mentre l'app è
+   aperta.
+6. Ogni file inviato viene registrato subito (`uri|dimensione|data`), quindi i file nuovi partono
    una sola volta e i file già inviati non vengono rimandati.
 
 ## Limiti noti
 
 - **50 MB per file**: limite del Bot API di Telegram (non aggirabile lato app).
-- Android **non garantisce l'ora esatta** dei task in background: l'orario è un obiettivo, non una
-  sveglia; per questo esiste il recupero all'apertura. Su Xiaomi/Huawei/Oppo/Vivo conviene togliere
-  l'app dall'ottimizzazione batteria (vedi [GUIDA.md](GUIDA.md)).
+- Senza il permesso **Allarmi e promemoria** (Android 12+) o con l'**ottimizzazione batteria**
+  attiva, il produttore può ritardare la sveglia: per questo esistono il recupero all'apertura e il
+  task WorkManager. Su Xiaomi/Huawei/Oppo/Vivo conviene anche attivare l'avvio automatico (vedi
+  [GUIDA.md](GUIDA.md)).
+- Un **arresto forzato** dalle impostazioni Android cancella le sveglie: tornano alla prossima
+  apertura dell'app o al riavvio del telefono.
 - Vengono controllati i file al **primo livello** della cartella scelta (non le sottocartelle).
 - L'APK contiene solo la libreria **arm64-v8a** (tutti gli smartphone Android recenti). Per un
   dispositivo armv7/x86 aggiungi l'architettura con `-PreactNativeArchitectures=...`.

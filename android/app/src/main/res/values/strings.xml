@@ -1,0 +1,5 @@
+<resources>
+  <string name="app_name">Telegram File Sender</string>
+  <string name="expo_system_ui_user_interface_style" translatable="false">automatic</string>
+  <string name="share_into_scheme" translatable="false">telegramfilesender</string>
+</resources>

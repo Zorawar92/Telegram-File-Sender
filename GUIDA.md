@@ -48,10 +48,14 @@ selezionato nella schermata principale.
 2. Premi **Scan ora** per il primo invio: manda tutti i file presenti **una volta sola**.
 3. Imposta l'ora del **Controllo giornaliero** (formato 24 ore, es. `03:00`).
 4. Attiva l'interruttore **Controlla la cartella**.
-5. Metti l'app **fuori dall'ottimizzazione batteria**: se compare la scheda
-   *"Consenti i controlli in background"* toccala e scegli **Non ottimizzare / Consenti**.
+5. Concedi i permessi che servono al backup puntuale (l'app te li chiede da sola, non sono
+   tutti obbligatori):
+   - se compare la scheda **«Consenti la sveglia esatta»**, toccala e attiva
+     *Allarmi e promemoria* per l'app. Senza, Android può ritardare il backup di ore;
+   - se compare la scheda **«Consenti i controlli in background»**, toccala e scegli
+     **Non ottimizzare / Consenti**.
    Su Xiaomi, Huawei, Oppo, Vivo, Samsung: in *Impostazioni → Batteria* metti l'app su
-   **Nessuna restrizione / Avvio automatico attivo**, altrimenti il sistema la blocca.
+   **Nessuna restrizione** e attiva l'**Avvio automatico**, altrimenti il sistema la blocca.
 
 Da quel momento:
 
@@ -64,16 +68,20 @@ Da quel momento:
 
 ## 5. Orari: come funziona davvero
 
-Android **non garantisce** l'ora esatta: i controlli in background sono raggruppati per
-risparmiare batteria. L'app quindi:
+All'orario scelto l'app imposta una **sveglia di sistema** Android (`AlarmManager`): il telefono
+si sveglia anche in Doze e anche con l'app chiusa, e il controllo parte. La sveglia viene
+riprogrammata per il giorno dopo *prima* di iniziare l'invio, e viene ricreata da sola dopo un
+riavvio o un aggiornamento dell'app.
 
-1. registra un controllo periodico (~ogni 15 minuti); quando l'orario scelto è passato e il
-   giorno non è ancora stato coperto, invia i file nuovi;
-2. **recupera il controllo mancato appena apri l'app** (o la riporti in primo piano);
-3. se l'app è aperta all'orario scelto, parte comunque entro un minuto.
+A questo si aggiungono due reti di sicurezza:
 
-In pratica: il backup gira all'ora scelta oppure al primo momento utile in cui Android sveglia
-l'app o tu la apri.
+1. il controllo periodico di `expo-background-task` (WorkManager, circa ogni 15 minuti): se la
+   sveglia è stata ritardata o bloccata dal produttore, il controllo parte appena possibile;
+2. il **recupero all'apertura dell'app** (e al ritorno in primo piano): se il giorno non è ancora
+   stato coperto, l'app controlla subito la cartella.
+
+In pratica: il backup gira all'ora scelta; se Android non lo sveglia, recupera al primo momento
+utile (sblocco del telefono o apertura dell'app) invece di perdere il giro.
 
 ## 6. Diagnostica (quando qualcosa non torna)
 
@@ -82,6 +90,10 @@ Nella scheda *Backup automatico* tocca **Diagnostica**:
 | Voce | Cosa significa |
 |---|---|
 | Task in background registrato | `no` = il backup automatico non è attivo: riattiva l'interruttore |
+| Sveglia di sistema | quando è previsto il prossimo risveglio e se è **esatta** o approssimativa |
+| Allarmi esatti consentiti | `no` = manca il permesso *Allarmi e promemoria*: usa la scheda in alto |
+| Ultimo risveglio della sveglia | quando Android ha svegliato l'app, e se per la sveglia o per un riavvio |
+| Esito ultimo risveglio | cosa ha fatto il lavoro avviato dalla sveglia (o l'errore) |
 | Giorno già coperto | il giorno del controllo automatico già eseguito |
 | Esito ultimo tentativo | quanti file sono partiti nell'ultimo giro automatico |
 | Ultimo errore | il messaggio dell'ultimo problema (rete, permessi, chat…) |
@@ -103,8 +115,15 @@ Succede solo se hai toccato *Azzera memoria invii* o se il permesso della cartel
 Android assegna URI nuovi ai file. Altrimenti l'app tiene traccia di ogni invio.
 
 **Non parte nulla di notte.**
-Quasi sempre è l'ottimizzazione batteria del produttore. Concedi "nessuna restrizione" e togli
-l'app dalla lista delle app "messe in pausa" / "risparmio energetico adattivo".
+Controlla in ordine: (1) la Diagnostica → *Sveglia di sistema* deve dire un orario, non
+"non impostata"; (2) *Allarmi esatti consentiti* deve essere **sì** (altrimenti tocca la scheda
+*Consenti la sveglia esatta*); (3) l'ottimizzazione batteria deve essere disattivata e, su
+Xiaomi/Huawei/Oppo/Vivo/Samsung, va attivato anche l'avvio automatico dell'app.
+
+**Ho aggiornato l'app e la sveglia è sparita.**
+Non succede: dopo un aggiornamento Android cancella le sveglie, ma l'app le ricrea da sola
+(receiver `MY_PACKAGE_REPLACED`). Se hai fatto un "arresto forzato" dalle impostazioni, torna
+tutto alla prossima apertura dell'app o al riavvio del telefono.
 
 **Posso usare un canale privato?**
 Sì: aggiungi il bot come amministratore del canale e usa l'ID del canale (`-100…`) come Chat ID.

@@ -1,5 +1,55 @@
 # Changelog
 
+## 1.2.0 — sveglia di sistema per il backup automatico
+
+Il backup automatico non partiva da solo: WorkManager (usato da `expo-background-task`) è un
+meccanismo "best effort", può slittare di ore o restare fermo finché il telefono non viene
+sbloccato, e diversi produttori lo bloccano del tutto quando l'app è chiusa. Ora a svegliare
+l'app è una **sveglia di sistema** di Android, all'orario scelto.
+
+### Aggiunto
+
+- **Modulo nativo `modules/alarm-backup`**: sveglia quotidiana con
+  `AlarmManager.setExactAndAllowWhileIdle` (funziona anche in Doze / a telefono fermo), con
+  riprogrammazione automatica del giorno successivo **prima** di eseguire il backup, così un
+  errore non spegne i controlli futuri.
+- **Receiver del riavvio**: dopo un riavvio, un aggiornamento dell'app o un cambio di ora/fuso
+  la sveglia viene rimessa in piedi da sola (`BOOT_COMPLETED`, `MY_PACKAGE_REPLACED`, `TIME_SET`,
+  `TIMEZONE_CHANGED`).
+- **Esecuzione del task in headless**: la sveglia accoda un lavoro `WorkManager` che avvia l'app
+  in background ed esegue il task già registrato con `expo-background-task` (stessa strada usata
+  da Expo, quindi nessun doppio task JavaScript da mantenere).
+- **Permesso «Allarmi e promemoria»** (`SCHEDULE_EXACT_ALARM`, Android 12+): l'app mostra una
+  scheda con il pulsante che apre la schermata giusta delle impostazioni. Senza permesso il
+  backup usa una sveglia approssimativa invece di non partire affatto.
+- **Diagnostica della sveglia**: prossimo risveglio (esatto/approssimativo), ultimo risveglio
+  (sveglia o riavvio), esito dell'ultimo tentativo, stato del permesso.
+- Il cambio dell'orario nell'app riprogramma subito la sveglia; spegnere l'interruttore la
+  cancella.
+
+### Corretto
+
+- **Sorgenti mancanti nel repository**: `src/`, `android/` e `assets/` c'erano solo nello zip
+  `telegram-file-sender-1.1.0-source.zip`, quindi il repo non si poteva compilare. Ora sono
+  versionati.
+- **Workflow GitHub** unico e funzionante (`build-apk.yml`): il precedente `release.yml`
+  eseguiva `./gradlew` dalla radice, dove non c'è `gradlew`, e non poteva produrre l'APK.
+- **Doppio controllo ravvicinato**: se sveglia e task periodico partono insieme, il secondo non
+  segna più il giorno come coperto né registra un finto errore («controllo già in corso»).
+- **`npm run typecheck`** non si perde più nei progetti Replit inutilizzati (`artifacts/`,
+  `lib/`, `scripts/` esclusi dal `tsconfig`).
+
+### Note
+
+- `package.json` → `expo.autolinking.buildFromSource: ["expo-background-task"]`: la sveglia
+  riusa lo scheduler di `expo-background-task`, che quindi viene compilato dai sorgenti invece
+  di usare l'AAR precompilato.
+- WorkManager resta attivo come rete di sicurezza (~ogni 15 minuti) insieme al recupero
+  all'apertura dell'app: se la sveglia viene bloccata dal produttore, il controllo slitta ma non
+  si perde.
+- Un "arresto forzato" da Impostazioni cancella le sveglie di Android: si ripristinano alla
+  prossima apertura dell'app o al riavvio. È un limite del sistema, non dell'app.
+
 ## 1.1.0 — correzione invii e backup automatico
 
 Questa versione riparte dal progetto originale (`Zorawar92/Telegram-File-Sender`) e corregge i

@@ -33,6 +33,16 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import { ErrorBoundary } from './src/ErrorBoundary';
 import { IncomingShareBridge, SharedFile } from './src/IncomingShareBridge';
 import {
+  AlarmInfo,
+  describeAlarm,
+  formatAlarmMoment,
+  formatAlarmTimestamp,
+  getAlarmInfo,
+  isAlarmBackupAvailable,
+  openExactAlarmSettings,
+  syncAlarmWithState,
+} from './src/alarm';
+import {
   isBackgroundTaskRegistered,
   registerBackgroundTask,
   unregisterBackgroundTask,
@@ -113,6 +123,7 @@ function HomeScreen() {
   const [scheduleTime, setScheduleTime] = useState('03:00');
   const [folderAccessible, setFolderAccessible] = useState<boolean | null>(null);
   const [taskRegistered, setTaskRegistered] = useState(false);
+  const [alarmInfo, setAlarmInfo] = useState<AlarmInfo | null>(null);
   const [batteryOptimizationEnabled, setBatteryOptimizationEnabled] = useState<boolean | null>(null);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [isReady, setIsReady] = useState(false);
@@ -137,6 +148,7 @@ function HomeScreen() {
     setFolderState(state);
     setScheduleTime(formatScheduleTime(state.scheduleHour, state.scheduleMinute));
     refreshFolderAccess(state);
+    setAlarmInfo(getAlarmInfo());
   }, [refreshFolderAccess]);
 
   const refreshBatteryOptimization = useCallback(async () => {
@@ -165,6 +177,9 @@ function HomeScreen() {
       setFolderState(state);
       setScheduleTime(formatScheduleTime(state.scheduleHour, state.scheduleMinute));
       setTaskRegistered(registered);
+      // Se Android ha cancellato la sveglia (riavvio, aggiornamento, "forza chiusura")
+      // la rimettiamo in piedi appena l'app viene aperta.
+      setAlarmInfo(syncAlarmWithState(state));
       setIsReady(true);
       refreshFolderAccess(state);
     })().catch(() => {
@@ -211,6 +226,9 @@ function HomeScreen() {
     const subscription = AppState.addEventListener('change', (next) => {
       if (next === 'active') {
         refreshBatteryOptimization();
+        // Al ritorno dalle impostazioni (permesso sveglia esatta, batteria) e
+        // dopo un riavvio: riallinea la sveglia allo stato salvato.
+        setAlarmInfo(syncAlarmWithState(loadState()));
         void runCatchUpIfDue();
       }
     });
@@ -254,6 +272,22 @@ function HomeScreen() {
     } finally {
       await refreshBatteryOptimization();
     }
+  }
+
+  async function requestExactAlarmPermission() {
+    setNotice(null);
+    const opened = openExactAlarmSettings();
+    if (!opened) {
+      setNotice({
+        tone: 'error',
+        text: 'Non riesco ad aprire la schermata degli allarmi: cerca «Allarmi e promemoria» nelle impostazioni dell’app.',
+      });
+      return;
+    }
+    setNotice({
+      tone: 'info',
+      text: 'Attiva «Consenti allarmi e promemoria» per Telegram File Sender, poi torna qui: la sveglia si aggiorna da sola.',
+    });
   }
 
   async function pickFolder() {
@@ -305,11 +339,6 @@ function HomeScreen() {
 
     try {
       await persistCredentials();
-      if (enabled) {
-        await registerBackgroundTask();
-      } else {
-        await unregisterBackgroundTask();
-      }
 
       const now = new Date();
       const alreadyPastSchedule =
@@ -324,19 +353,46 @@ function HomeScreen() {
         lastScheduledDateKey:
           enabled && alreadyPastSchedule ? localDateKey(now) : current.lastScheduledDateKey,
       };
+      // Salvo prima di registrare: così la sveglia legge già lo stato nuovo.
       saveState(next);
       setFolderState(next);
+
+      if (enabled) {
+        await registerBackgroundTask();
+      } else {
+        await unregisterBackgroundTask();
+      }
+
       setTaskRegistered(await isBackgroundTaskRegistered());
+      const armed = syncAlarmWithState(next);
+      setAlarmInfo(armed);
 
       const schedule = formatScheduleTime(next.scheduleHour, next.scheduleMinute);
-      setNotice({
-        tone: 'success',
-        text: enabled
-          ? `Backup automatico attivo. Prossimo controllo dopo le ${schedule} (Android può ritardarlo di qualche minuto). Premi «Scan ora» per inviare subito i file nuovi.`
-          : 'Backup automatico in pausa.',
-      });
+      let successText = 'Backup automatico in pausa.';
+      if (enabled) {
+        if (!armed) {
+          successText = `Backup automatico attivo per le ${schedule}, ma in questa build la sveglia di sistema non c’è: il controllo partirà al prossimo risveglio di Android o all’apertura dell’app.`;
+        } else if (!armed.scheduled) {
+          successText =
+            'Backup automatico attivo, ma la sveglia non risulta programmata: apri la Diagnostica e tocca «Riprogramma la sveglia».';
+        } else if (!armed.canScheduleExact) {
+          successText = `Backup automatico attivo: sveglia per ${formatAlarmMoment(
+            armed.nextTriggerAt,
+          )}. Concedi «Allarmi e promemoria» (scheda qui sotto) per la massima puntualità.`;
+        } else {
+          successText = `Backup automatico attivo: sveglia esatta per ${formatAlarmMoment(
+            armed.nextTriggerAt,
+          )}. Premi «Scan ora» per inviare subito i file nuovi.`;
+        }
+      }
+      setNotice({ tone: 'success', text: successText });
       await Haptics.selectionAsync();
     } catch (error) {
+      // Se l'attivazione non è riuscita, lo stato salvato non deve restare "acceso".
+      const saved = loadState();
+      if (saved.enabled !== enabled) {
+        saveState({ ...saved, enabled: !enabled });
+      }
       setNotice({
         tone: 'error',
         text: error instanceof Error ? error.message : 'Non riesco a cambiare il backup automatico.',
@@ -357,6 +413,9 @@ function HomeScreen() {
     };
     saveState(next);
     setFolderState(next);
+    if (next.enabled) {
+      setAlarmInfo(syncAlarmWithState(next));
+    }
   }
 
   async function scanFolderNow() {
@@ -561,16 +620,6 @@ function HomeScreen() {
   }, [folderState.directoryUri, folderState.lastScanAt]);
 
   const schedule = formatScheduleTime(folderState.scheduleHour, folderState.scheduleMinute);
-  const nextRunLabel = useMemo(() => {
-    const now = new Date();
-    const scheduleMinutes = folderState.scheduleHour * 60 + folderState.scheduleMinute;
-    const nowMinutes = now.getHours() * 60 + now.getMinutes();
-    if (nowMinutes >= scheduleMinutes && folderState.lastScheduledDateKey !== localDateKey(now)) {
-      return `in attesa (dopo le ${schedule}) — parte all’apertura dell’app o al prossimo risveglio di Android`;
-    }
-    if (nowMinutes < scheduleMinutes) return `oggi alle ${schedule}`;
-    return `domani alle ${schedule}`;
-  }, [folderState.lastScheduledDateKey, folderState.scheduleHour, folderState.scheduleMinute, schedule]);
 
   const busy = isScanning || isUploading || isCheckingBot;
 
@@ -797,9 +846,20 @@ function HomeScreen() {
                 </Text>
               </View>
               <View style={extra.statusRow}>
+                <Feather
+                  name="clock"
+                  size={13}
+                  color={alarmInfo?.scheduled ? colors.success : colors.mutedForeground}
+                />
+                <Text style={extra.statusText}>
+                  Sveglia di sistema: {describeAlarm(alarmInfo, folderState.enabled, isAlarmBackupAvailable)}
+                </Text>
+              </View>
+              <View style={extra.statusRow}>
                 <Feather name="calendar" size={13} color={colors.mutedForeground} />
                 <Text style={extra.statusText}>
-                  Prossimo controllo: {folderState.enabled ? nextRunLabel : 'backup automatico spento'}
+                  Se la sveglia salta: recupero all’apertura dell’app e controllo periodico di
+                  Android
                 </Text>
               </View>
             </View>
@@ -856,8 +916,10 @@ function HomeScreen() {
           </View>
 
           <Text style={styles.automationHint}>
-            Android non garantisce l’ora esatta: il controllo automatico può slittare di qualche
-            minuto per risparmiare batteria. Se salta, l’app lo recupera appena la apri.
+            All’orario scelto Android sveglia l’app con una sveglia di sistema, anche a telefono
+            fermo. In più il controllo viene recuperato all’apertura dell’app se il sistema lo
+            salta. Concedi «Allarmi e promemoria» e togli l’ottimizzazione batteria per la
+            massima puntualità.
           </Text>
 
           <Pressable
@@ -876,6 +938,28 @@ function HomeScreen() {
                 Task in background registrato: {taskRegistered ? 'sì' : 'no'}
               </Text>
               <Text style={extra.diagLine}>
+                Modulo sveglia: {isAlarmBackupAvailable ? 'disponibile' : 'non disponibile'}
+              </Text>
+              <Text style={extra.diagLine}>
+                Sveglia di sistema:{' '}
+                {alarmInfo
+                  ? alarmInfo.scheduled
+                    ? `${formatAlarmMoment(alarmInfo.nextTriggerAt)} (${alarmInfo.exact ? 'esatta' : 'approssimativa'})`
+                    : 'non programmata'
+                  : 'modulo non disponibile'}
+              </Text>
+              <Text style={extra.diagLine}>
+                Allarmi esatti consentiti: {alarmInfo?.canScheduleExact ? 'sì' : 'no'}
+              </Text>
+              <Text style={extra.diagLine}>
+                Ultimo risveglio della sveglia: {formatAlarmTimestamp(alarmInfo?.lastFiredAt ?? null)}
+                {alarmInfo?.lastSource ? ` (${alarmInfo.lastSource === 'boot' ? 'riavvio' : 'sveglia'})` : ''}
+              </Text>
+              <Text style={extra.diagLine}>
+                Esito ultimo risveglio: {alarmInfo?.lastRunResult || '—'}
+                {alarmInfo?.lastRunAt ? ` (${formatAlarmTimestamp(alarmInfo.lastRunAt)})` : ''}
+              </Text>
+              <Text style={extra.diagLine}>
                 Giorno già coperto: {folderState.lastScheduledDateKey || 'nessuno'}
               </Text>
               <Text style={extra.diagLine}>
@@ -888,6 +972,22 @@ function HomeScreen() {
               <Text style={extra.diagLine}>
                 File in memoria invii: {Object.keys(folderState.sent).length}
               </Text>
+              {folderState.enabled && alarmInfo && !alarmInfo.scheduled ? (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => {
+                    setAlarmInfo(syncAlarmWithState(loadState()));
+                    setNotice({
+                      tone: 'info',
+                      text: 'Sveglia riprogrammata: controlla qui sopra l’orario del prossimo risveglio.',
+                    });
+                  }}
+                  style={({ pressed }) => [extra.fixButton, pressed && styles.pressed]}
+                >
+                  <Feather name="clock" size={13} color={colors.primary} />
+                  <Text style={extra.fixButtonText}>Riprogramma la sveglia</Text>
+                </Pressable>
+              ) : null}
               <Pressable
                 accessibilityRole="button"
                 onPress={resetSentHistory}
@@ -899,6 +999,30 @@ function HomeScreen() {
             </View>
           ) : null}
         </View>
+
+        {Platform.OS === 'android' && folderState.enabled && alarmInfo && !alarmInfo.canScheduleExact ? (
+          <View style={styles.batteryCard}>
+            <View style={styles.batteryIcon}>
+              <Feather name="bell" size={17} color={colors.primary} />
+            </View>
+            <View style={styles.batteryCopy}>
+              <Text style={styles.batteryTitle}>Consenti la sveglia esatta</Text>
+              <Text style={styles.batteryText}>
+                Senza il permesso «Allarmi e promemoria» Android può ritardare il backup di ore.
+                Tocca qui e attivalo: la sveglia si riprogramma da sola al ritorno nell’app.
+              </Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Apri il permesso allarmi e promemoria"
+              testID="exact-alarm-settings"
+              onPress={requestExactAlarmPermission}
+              style={({ pressed }) => [styles.batteryButton, pressed && styles.pressed]}
+            >
+              <Feather name="external-link" size={15} color={colors.primaryForeground} />
+            </Pressable>
+          </View>
+        ) : null}
 
         {Platform.OS === 'android' && batteryOptimizationEnabled === true ? (
           <View style={styles.batteryCard}>
@@ -1077,6 +1201,23 @@ function createExtraStyles(colors: ReturnType<typeof useColors>) {
     },
     diagButtonText: {
       color: colors.destructive,
+      fontSize: 11,
+      fontFamily: 'Inter_600SemiBold',
+    },
+    fixButton: {
+      marginTop: 6,
+      alignSelf: 'flex-start',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 7,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.primary,
+    },
+    fixButtonText: {
+      color: colors.primary,
       fontSize: 11,
       fontFamily: 'Inter_600SemiBold',
     },

@@ -1,0 +1,31 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+  <!-- Sveglia esatta: su Android 12+ va concessa dall'utente (Impostazioni → Allarmi
+       e promemoria). Senza, l'app usa una sveglia approssimativa. -->
+  <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+  <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+  <application>
+    <!-- Riceve la sveglia quotidiana e fa partire il controllo della cartella. -->
+    <receiver
+      android:name="expo.modules.alarmbackup.BackupAlarmReceiver"
+      android:enabled="true"
+      android:exported="false" />
+
+    <!-- Dopo un riavvio (o un aggiornamento dell'app) Android cancella le sveglie:
+         qui le rimettiamo in piedi senza dover aprire l'app. -->
+    <receiver
+      android:name="expo.modules.alarmbackup.BackupBootReceiver"
+      android:enabled="true"
+      android:exported="true">
+      <intent-filter>
+        <action android:name="android.intent.action.BOOT_COMPLETED" />
+        <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+        <action android:name="android.intent.action.TIME_SET" />
+        <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+        <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+      </intent-filter>
+    </receiver>
+  </application>
+</manifest>
