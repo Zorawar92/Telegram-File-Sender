@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.3.0 — repository ridotto all'essenziale, release firmata
+
+Nessuna modifica al comportamento dell'app: questa versione toglie tutto ciò che non serviva
+al progetto Android e porta a casa il lavoro della 1.2.0 con un APK allegato alla release.
+
+### Rimosso
+
+- **Scaffolding Replit** mai usato dall'app: `artifacts/` (server Express, mockup sandbox, copia
+  web del progetto), `lib/` (api-client, api-spec, api-zod, db/Drizzle), `scripts/`,
+  `tsconfig.base.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.npmrc`, `.replit`,
+  `.replitignore`, `replit.md`, `.agents/`, `attached_assets/`.
+- **Archivio sorgenti** `telegram-file-sender-1.1.0-source.zip` (i sorgenti sono versionati) e
+  `.sudo_as_admin_successful`, due residui dell'ambiente di sviluppo.
+- **Codice morto**: `openBatterySettings` e il campo `batteryOptimized` del modulo nativo (la
+  scheda batteria usa già `expo-battery` + `expo-intent-launcher`), `tryTriggerBackgroundTaskNow`.
+- Commenti rimasti dallo scaffold web nei file dei colori.
+
+Risultato: da 218 a ~50 file versionati, e il repository contiene solo l'app (`App.tsx`, `src/`,
+`modules/alarm-backup`, `android/`, `assets/`) più documentazione e workflow.
+
+### Note
+
+- Tag e release seguono la convenzione già usata (`V1.0`, `V1.1`, `V1.2`): questa è **V1.3**;
+  il workflow ora parte anche sui tag con la `V` maiuscola e allega l'APK alla release.
+- Versione 1.3.0, `versionCode 4`: si installa sopra la 1.2.0 senza perdere token, Chat ID,
+  cartella scelta e stato dei file già inviati.
+
 ## 1.2.0 — sveglia di sistema per il backup automatico
 
 Il backup automatico non partiva da solo: WorkManager (usato da `expo-background-task`) è un
@@ -36,8 +63,8 @@ l'app è una **sveglia di sistema** di Android, all'orario scelto.
   eseguiva `./gradlew` dalla radice, dove non c'è `gradlew`, e non poteva produrre l'APK.
 - **Doppio controllo ravvicinato**: se sveglia e task periodico partono insieme, il secondo non
   segna più il giorno come coperto né registra un finto errore («controllo già in corso»).
-- **`npm run typecheck`** non si perde più nei progetti Replit inutilizzati (`artifacts/`,
-  `lib/`, `scripts/` esclusi dal `tsconfig`).
+- **`npm run typecheck`** non si perde più nei progetti Replit inutilizzati (esclusi dal
+  `tsconfig`; nella 1.3.0 sono stati rimossi del tutto).
 
 ### Note
 

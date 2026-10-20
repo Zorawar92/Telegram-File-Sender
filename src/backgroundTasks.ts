@@ -109,12 +109,3 @@ export async function unregisterBackgroundTask(): Promise<void> {
   }
   cancelDailyAlarm();
 }
-
-/** Tentativo manuale immediato del task (utile per capire se il task è vivo). */
-export async function tryTriggerBackgroundTaskNow(): Promise<boolean> {
-  try {
-    return await BackgroundTask.triggerTaskWorkerForTestingAsync();
-  } catch {
-    return false;
-  }
-}

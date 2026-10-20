@@ -22,8 +22,6 @@ export type AlarmInfo = {
   exact: boolean;
   /** Android 12+: permesso "Allarmi e promemoria" concesso */
   canScheduleExact: boolean;
-  /** l'app è ancora soggetta all'ottimizzazione batteria */
-  batteryOptimized: boolean;
   lastFiredAt: number | null;
   lastSource: string | null;
   lastRunAt: number | null;
@@ -36,7 +34,6 @@ type AlarmBackupNativeModule = {
   getAlarmInfo(): AlarmInfo;
   canScheduleExactAlarms(): boolean;
   openExactAlarmSettings(): boolean;
-  openBatterySettings(): boolean;
 };
 
 const nativeModule =
@@ -83,10 +80,4 @@ export function canScheduleExactAlarms(): boolean {
 export function openExactAlarmSettings(): boolean {
   if (!nativeModule) return false;
   return safely(() => nativeModule.openExactAlarmSettings()) ?? false;
-}
-
-/** Apre Impostazioni → Batteria per questa app. */
-export function openBatterySettings(): boolean {
-  if (!nativeModule) return false;
-  return safely(() => nativeModule.openBatterySettings()) ?? false;
 }
