@@ -41,7 +41,6 @@ type AlarmBackupNativeModule = {
   scheduleDaily(hour: number, minute: number): AlarmInfo;
   cancel(): AlarmInfo;
   scheduleTestAlarm(minutes: number): AlarmInfo;
-  runNow(): boolean;
   openAppSettings(): boolean;
   getAlarmInfo(): AlarmInfo;
   canScheduleExactAlarms(): boolean;
@@ -91,12 +90,6 @@ export function scheduleTestAlarm(minutes = 1): AlarmInfo | null {
 export function openAppSettings(): boolean {
   if (!nativeModule) return false;
   return safely(() => nativeModule.openAppSettings()) ?? false;
-}
-
-/** Esegue il backup adesso, passando dallo stesso servizio della sveglia. */
-export function runBackupNow(): boolean {
-  if (!nativeModule) return false;
-  return safely(() => nativeModule.runNow()) ?? false;
 }
 
 /** Stato della sveglia, dei permessi e dell'ultimo risveglio. */

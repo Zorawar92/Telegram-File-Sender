@@ -48,11 +48,6 @@ class AlarmBackupModule : Module() {
       startFirstAvailable(context, listOf(appDetailsIntent(context)))
     }
 
-    /** Esegue il backup adesso, passando dallo stesso servizio della sveglia. */
-    Function("runNow") {
-      BackupRunService.start(context, AlarmScheduler.SOURCE_TEST)
-    }
-
     /** Stato completo: prossimo risveglio, permessi, ultimo esito. */
     Function("getAlarmInfo") {
       AlarmScheduler.info(context)

@@ -14,7 +14,6 @@ export {
   isAlarmBackupAvailable,
   openAppSettings,
   openExactAlarmSettings,
-  runBackupNow,
   scheduleDailyAlarm,
   scheduleTestAlarm,
 } from '../modules/alarm-backup';
