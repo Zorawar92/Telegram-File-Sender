@@ -68,20 +68,48 @@ Da quel momento:
 
 ## 5. Orari: come funziona davvero
 
-All'orario scelto l'app imposta una **sveglia di sistema** Android (`AlarmManager`): il telefono
-si sveglia anche in Doze e anche con l'app chiusa, e il controllo parte. La sveglia viene
-riprogrammata per il giorno dopo *prima* di iniziare l'invio, e viene ricreata da sola dopo un
-riavvio o un aggiornamento dell'app.
+All'orario scelto l'app imposta una **sveglia di sistema** Android (`setAlarmClock`, la stessa
+API delle sveglie della sveglia): il telefono si sveglia anche in Doze e anche con l'app chiusa.
+La sveglia avvia subito un **servizio in primo piano** che esegue il controllo, e viene
+riprogrammata per il giorno dopo *prima* di iniziare l'invio.
 
-A questo si aggiungono due reti di sicurezza:
+A questo si aggiungono altre tre sicurezze:
 
-1. il controllo periodico di `expo-background-task` (WorkManager, circa ogni 15 minuti): se la
-   sveglia è stata ritardata o bloccata dal produttore, il controllo parte appena possibile;
-2. il **recupero all'apertura dell'app** (e al ritorno in primo piano): se il giorno non è ancora
+1. un **controllo di recupero due ore dopo**: se il primo risveglio va perso (telefono spento,
+   riavvio, risparmio energetico) il secondo recupera il giro; se il backup è già stato fatto non
+   fa nulla;
+2. il controllo periodico di `expo-background-task` (WorkManager, circa ogni 15 minuti);
+3. il **recupero all'apertura dell'app** (e al ritorno in primo piano): se il giorno non è ancora
    stato coperto, l'app controlla subito la cartella.
 
 In pratica: il backup gira all'ora scelta; se Android non lo sveglia, recupera al primo momento
-utile (sblocco del telefono o apertura dell'app) invece di perdere il giro.
+utile invece di perdere il giro.
+
+### Samsung, Xiaomi, Huawei (One UI e simili)
+
+Questi telefoni "mettono in pausa" le app che usano poco, e un'app in pausa **non riceve le
+sveglie**. Una volta sola, dopo l'installazione:
+
+1. **Impostazioni → Batteria → Limiti di utilizzo in background**: togli *Telegram File Sender* da
+   **App in sospensione** e aggiungila a **App non in sospensione**.
+2. **Impostazioni → App → Telegram File Sender → Batteria**: scegli **Senza limiti**.
+3. **Impostazioni → Batteria** → disattiva (o escludi l'app da) **Sospendi app inutilizzate** e
+   **Ottimizzazione automatica giornaliera**.
+4. Su Xiaomi/Huawei/Oppo/Vivo: attiva anche l'**avvio automatico** dell'app.
+
+L'app se ne accorge da sola: se la batteria è ottimizzata o l'app è in un bucket di standby
+"raro", compare una scheda con il pulsante per aprire le impostazioni giuste.
+
+### Provare subito che la sveglia funzioni
+
+Non serve aspettare l'orario impostato:
+
+1. apri **Backup automatico → Diagnostica** e tocca **«Prova la sveglia tra 1 minuto»**;
+2. chiudi l'app e blocca lo schermo;
+3. dopo un paio di minuti riapri la Diagnostica: **Ultimo risveglio della sveglia** deve mostrare
+   l'ora appena passata e **Esito ultimo risveglio** deve dire `controllo eseguito`.
+
+Se resta «mai», il telefono non sta consegnando le sveglie: rifai i passaggi Samsung qui sopra.
 
 ## 6. Diagnostica (quando qualcosa non torna)
 
@@ -90,9 +118,11 @@ Nella scheda *Backup automatico* tocca **Diagnostica**:
 | Voce | Cosa significa |
 |---|---|
 | Task in background registrato | `no` = il backup automatico non è attivo: riattiva l'interruttore |
-| Sveglia di sistema | quando è previsto il prossimo risveglio e se è **esatta** o approssimativa |
-| Allarmi esatti consentiti | `no` = manca il permesso *Allarmi e promemoria*: usa la scheda in alto |
-| Ultimo risveglio della sveglia | quando Android ha svegliato l'app, e se per la sveglia o per un riavvio |
+| Sveglia di sistema | quando è previsto il prossimo risveglio e se è **esatta**, **da orologio** o approssimativa |
+| Allarmi esatti consentiti | `no` = manca il permesso: usa la scheda in alto |
+| Ottimizzazione batteria | `attiva (da togliere)` = il telefono può rimandare il backup |
+| Sospensione app | bucket di standby: `rara`/`limitata`/`mai` = Samsung sta limitando l'app |
+| Ultimo risveglio della sveglia | quando Android ha svegliato l'app, e perché (sveglia, recupero, prova, riavvio) |
 | Esito ultimo risveglio | cosa ha fatto il lavoro avviato dalla sveglia (o l'errore) |
 | Giorno già coperto | il giorno del controllo automatico già eseguito |
 | Esito ultimo tentativo | quanti file sono partiti nell'ultimo giro automatico |

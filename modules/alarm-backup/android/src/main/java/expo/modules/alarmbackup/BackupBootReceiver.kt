@@ -1,5 +1,6 @@
 package expo.modules.alarmbackup
 
+import android.app.AlarmManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -21,6 +22,8 @@ class BackupBootReceiver : BroadcastReceiver() {
       Intent.ACTION_MY_PACKAGE_REPLACED,
       Intent.ACTION_TIME_CHANGED,
       Intent.ACTION_TIMEZONE_CHANGED,
+      // Il permesso "Allarmi e promemoria" è stato concesso: la sveglia va rifatta esatta.
+      AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED,
       "android.intent.action.QUICKBOOT_POWERON" -> true
 
       else -> false

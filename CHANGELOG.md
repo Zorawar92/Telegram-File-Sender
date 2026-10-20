@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.3.1 — il backup automatico parte anche con l'app chiusa (Samsung)
+
+Il backup continuava a partire solo con l'app aperta e «Scan ora». La causa non era il codice
+della scansione ma **come** l'app veniva svegliata: la sveglia veniva delegata a WorkManager, che
+su Android 12+ (e su Samsung One UI in particolare) può rimandare il lavoro di ore o non
+eseguirlo affatto quando l'app è chiusa e il telefono è in tasca.
+
+### Corretto
+
+- **Sveglia «da orologio»**: al posto di `setExactAndAllowWhileIdle` ora usiamo
+  `AlarmManager.setAlarmClock`, che il sistema non può spostare, esce dal risparmio energetico per
+  essere consegnata e mostra l'icona della sveglia nella barra di stato (così si vede che è armata).
+- **Il backup parte dal servizio, non da WorkManager**: il receiver della sveglia avvia
+  direttamente un **foreground service** `dataSync` (`BackupRunService`) con wakelock, che esegue
+  il task JS in headless. WorkManager resta solo come ripiego se il servizio non è avviabile.
+- **Controllo di recupero**: due ore dopo il risveglio principale viene armato un secondo
+  tentativo. Se il primo va perso (telefono spento, riavvio, risparmio energetico) il giro viene
+  recuperato; se il backup è già stato fatto non fa nulla.
+- **Permesso `USE_EXACT_ALARM`** (Android 13+): concesso all'installazione e non revocabile, quindi
+  la sveglia non dipende più da «Allarmi e promemoria» attivato a mano. Su Android 12/12L resta
+  `SCHEDULE_EXACT_ALARM` (concesso all'installazione) con `maxSdkVersion=32`.
+- **Riarmo quando il permesso viene concesso** (`SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED`).
+
+### Aggiunto
+
+- **«Prova la sveglia tra 1 minuto»** nella Diagnostica: arma una sveglia di prova, così si verifica
+  subito che telefono → servizio → invio funzioni, senza aspettare l'orario impostato.
+- **Diagnostica della sospensione**: bucket di standby di Android (`attiva` … `rara`, `limitata`,
+  `mai`) e stato dell'ottimizzazione batteria, con una scheda **«Samsung: escludi l'app dalla
+  sospensione»** e il pulsante per aprire le impostazioni dell'app.
+- `setAlarmClock` e origine dell'ultimo risveglio (sveglia / recupero / prova / riavvio) nella
+  Diagnostica.
+
+### Note
+
+- `USE_EXACT_ALARM` è un permesso ristretto per il Play Store (riservato a sveglie e calendari):
+  qui è corretto perché l'APK si installa a mano. Per una pubblicazione sul Play Store va rimosso
+  e sostituito da `SCHEDULE_EXACT_ALARM` con richiesta esplicita all'utente.
+- Il servizio in primo piano mostra un avviso «Backup in corso»; su Android 13+ senza permesso
+  notifiche l'avviso non compare, ma il servizio funziona lo stesso (non chiediamo permessi in più).
+- Versione 1.3.1, `versionCode 5`.
+
 ## 1.3.0 — repository ridotto all'essenziale, release firmata
 
 Nessuna modifica al comportamento dell'app: questa versione toglie tutto ciò che non serviva

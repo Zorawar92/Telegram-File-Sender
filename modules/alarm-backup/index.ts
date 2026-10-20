@@ -5,8 +5,9 @@ import { Platform } from 'react-native';
  * Modulo nativo della sveglia del backup (solo Android).
  *
  * WorkManager da solo non garantisce l'ora: la sveglia di sistema
- * (`AlarmManager.setExactAndAllowWhileIdle`) sveglia il telefono all'orario scelto,
- * anche in Doze, e fa partire il controllo della cartella.
+ * (`AlarmManager.setAlarmClock`) sveglia il telefono all'orario scelto, anche con
+ * l'app chiusa e in risparmio energetico, e avvia un foreground service che esegue
+ * il controllo della cartella.
  */
 
 export type AlarmInfo = {
@@ -20,8 +21,16 @@ export type AlarmInfo = {
   nextTriggerAt: number | null;
   /** la sveglia è esatta (permesso concesso) o approssimativa */
   exact: boolean;
+  /** è una sveglia "da orologio" (`setAlarmClock`): il sistema non la sposta */
+  alarmClock: boolean;
   /** Android 12+: permesso "Allarmi e promemoria" concesso */
   canScheduleExact: boolean;
+  /** l'app è ancora soggetta all'ottimizzazione batteria */
+  batteryOptimized: boolean;
+  /** bucket di standby dell'app: attiva / frequente / rara / limitata / mai … */
+  standbyBucket: string;
+  /** timestamp (ms) della sveglia di prova, se impostata */
+  testScheduledAt: number | null;
   lastFiredAt: number | null;
   lastSource: string | null;
   lastRunAt: number | null;
@@ -31,6 +40,9 @@ export type AlarmInfo = {
 type AlarmBackupNativeModule = {
   scheduleDaily(hour: number, minute: number): AlarmInfo;
   cancel(): AlarmInfo;
+  scheduleTestAlarm(minutes: number): AlarmInfo;
+  runNow(): boolean;
+  openAppSettings(): boolean;
   getAlarmInfo(): AlarmInfo;
   canScheduleExactAlarms(): boolean;
   openExactAlarmSettings(): boolean;
@@ -63,6 +75,28 @@ export function scheduleDailyAlarm(hour: number, minute: number): AlarmInfo | nu
 export function cancelDailyAlarm(): AlarmInfo | null {
   if (!nativeModule) return null;
   return safely(() => nativeModule.cancel());
+}
+
+/**
+ * Sveglia di prova tra `minutes` minuti: verifica subito che il telefono svegli
+ * davvero l'app, senza aspettare l'orario impostato (utile dopo un riavvio o su
+ * un telefono che rimanda i lavori in background).
+ */
+export function scheduleTestAlarm(minutes = 1): AlarmInfo | null {
+  if (!nativeModule) return null;
+  return safely(() => nativeModule.scheduleTestAlarm(minutes));
+}
+
+/** Apre la scheda dell'app nelle impostazioni di Android (batteria, sospensione). */
+export function openAppSettings(): boolean {
+  if (!nativeModule) return false;
+  return safely(() => nativeModule.openAppSettings()) ?? false;
+}
+
+/** Esegue il backup adesso, passando dallo stesso servizio della sveglia. */
+export function runBackupNow(): boolean {
+  if (!nativeModule) return false;
+  return safely(() => nativeModule.runNow()) ?? false;
 }
 
 /** Stato della sveglia, dei permessi e dell'ultimo risveglio. */
