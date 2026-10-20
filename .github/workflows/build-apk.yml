@@ -27,7 +27,12 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - uses: android-actions/setup-android@v3
+      # L'SDK Android è già presente sulle runner ubuntu-latest: basta indicarlo a Gradle.
+      # (android-actions/setup-android@v3 non funziona più sulle runner aggiornate.)
+      - name: Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "sdk.dir=$ANDROID_HOME" > android/local.properties
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
