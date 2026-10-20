@@ -310,13 +310,15 @@ internal object AlarmScheduler {
     val appContext = context.applicationContext
     val manager = appContext.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return "n/d"
     return try {
+      // Valori di UsageStatsManager: ACTIVE=10, WORKING_SET=20, FREQUENT=30,
+      // RARE=40, RESTRICTED=45, NEVER=50 (le costanti non sono tutte pubbliche).
       when (manager.appStandbyBucket) {
-        UsageStatsManager.STANDBY_BUCKET_ACTIVE -> "attiva"
-        UsageStatsManager.STANDBY_BUCKET_WORKING_SET -> "in uso"
-        UsageStatsManager.STANDBY_BUCKET_FREQUENT -> "frequente"
-        UsageStatsManager.STANDBY_BUCKET_RARE -> "rara"
-        UsageStatsManager.STANDBY_BUCKET_RESTRICTED -> "limitata"
-        UsageStatsManager.STANDBY_BUCKET_NEVER -> "mai"
+        10 -> "attiva"
+        20 -> "in uso"
+        30 -> "frequente"
+        40 -> "rara"
+        45 -> "limitata"
+        50 -> "mai"
         else -> "sconosciuta"
       }
     } catch (error: Throwable) {
