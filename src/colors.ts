@@ -1,15 +1,8 @@
 /**
- * Semantic design tokens for the mobile app.
+ * Palette dell'app: token semantici (testo, superfici, accento, stati).
  *
- * These tokens mirror the naming conventions used in web artifacts (index.css)
- * so that multi-artifact projects share a cohesive visual identity.
- *
- * Replace the placeholder values below with values that match the project's
- * brand. If a sibling web artifact exists, read its index.css and convert the
- * HSL values to hex so both artifacts use the same palette.
- *
- * To add dark mode, add a `dark` key with the same token names.
- * The useColors() hook will automatically pick it up.
+ * `light` e `dark` hanno gli stessi nomi, così `useColors()` restituisce
+ * sempre lo stesso insieme di chiavi e gli stili funzionano in entrambi i temi.
  */
 
 const colors = {

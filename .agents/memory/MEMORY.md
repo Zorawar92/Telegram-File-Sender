@@ -1,2 +1,0 @@
-- [Mobile secure storage fallback](mobile-secure-storage.md) — native credentials use SecureStore; browser previews need a separate local-storage fallback.
-- [Expo incoming sharing platforms](expo-sharing-platforms.md) — incoming share payload hooks are native-only and must not mount in browser previews.

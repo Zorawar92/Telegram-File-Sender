@@ -48,11 +48,6 @@ class AlarmBackupModule : Module() {
     Function("openExactAlarmSettings") {
       openExactAlarmSettings(context)
     }
-
-    /** Apre Impostazioni → Batteria per questa app. */
-    Function("openBatterySettings") {
-      openBatterySettings(context)
-    }
   }
 
   private fun openExactAlarmSettings(appContext: Context): Boolean {
@@ -64,20 +59,6 @@ class AlarmBackupModule : Module() {
           Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
           Uri.parse("package:${appContext.packageName}"),
         ),
-        appDetailsIntent(appContext),
-      ),
-    )
-  }
-
-  private fun openBatterySettings(appContext: Context): Boolean {
-    return startFirstAvailable(
-      appContext,
-      listOf(
-        Intent(
-          Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-          Uri.parse("package:${appContext.packageName}"),
-        ),
-        Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
         appDetailsIntent(appContext),
       ),
     )

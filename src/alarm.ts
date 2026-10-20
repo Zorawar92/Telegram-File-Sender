@@ -12,7 +12,6 @@ export {
   cancelDailyAlarm,
   getAlarmInfo,
   isAlarmBackupAvailable,
-  openBatterySettings,
   openExactAlarmSettings,
   scheduleDailyAlarm,
 } from '../modules/alarm-backup';

@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Build
-import android.os.PowerManager
 import android.util.Log
 import java.util.Calendar
 
@@ -168,7 +167,6 @@ internal object AlarmScheduler {
       "nextTriggerAt" to if (nextTriggerAt > 0L) nextTriggerAt.toDouble() else null,
       "exact" to preferences.getBoolean(KEY_EXACT, false),
       "canScheduleExact" to canScheduleExact(appContext),
-      "batteryOptimized" to isBatteryOptimized(appContext),
       "lastFiredAt" to readMillis(preferences, KEY_LAST_FIRED),
       "lastSource" to preferences.getString(KEY_LAST_SOURCE, null),
       "lastRunAt" to readMillis(preferences, KEY_LAST_RUN),
@@ -195,16 +193,6 @@ internal object AlarmScheduler {
 
   fun recordRunResult(context: Context, result: String) {
     prefs(context).edit().putString(KEY_LAST_RESULT, result).apply()
-  }
-
-  fun isBatteryOptimized(context: Context): Boolean {
-    val appContext = context.applicationContext
-    val powerManager = appContext.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return false
-    return try {
-      !powerManager.isIgnoringBatteryOptimizations(appContext.packageName)
-    } catch (error: Throwable) {
-      false
-    }
   }
 
   private fun readMillis(preferences: SharedPreferences, key: String): Double? {

@@ -2,7 +2,7 @@
   "expo": {
     "name": "Telegram File Sender",
     "slug": "telegram-file-sender",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "orientation": "portrait",
     "icon": "./assets/images/telegram-file-sender-icon.png",
     "scheme": "telegramfilesender",
@@ -18,7 +18,7 @@
     },
     "android": {
       "package": "com.zorawar.telegramfilesender",
-      "versionCode": 3,
+      "versionCode": 4,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#071522"

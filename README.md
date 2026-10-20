@@ -22,6 +22,10 @@ Chat ID restano nella memoria protetta del dispositivo.
 | File singoli ok ma `getMe` inutile per capire l'errore | la verifica controllava solo il token | **Verifica bot e chat** (`getMe` + `getChat`) e **Messaggio di prova** |
 | Nessuna visibilità su cosa succede | nessun log/errore salvato | scheda **Diagnostica** con esito, errori, file in memoria e reset |
 
+Il repository contiene **solo l'app** (`App.tsx`, `src/`, `modules/alarm-backup`, `android/`,
+`assets/`): lo scaffolding Replit (server Express, Drizzle, OpenAPI, mockup sandbox) e lo zip dei
+sorgenti sono stati rimossi nella 1.3.0.
+
 Altre correzioni: limite 50 MB controllato prima dell'invio, retry sui `429` con `retry_after`,
 un solo controllo per volta (niente doppi invii), messaggi d'errore in italiano, permesso cartella
 scaduto segnalato chiaramente, `expo-router` e altre 12 dipendenze inutili rimosse, workflow GitHub
@@ -68,8 +72,9 @@ Store serve una keystore di release propria.
 
 ### Build automatica con GitHub Actions
 
-`.github/workflows/build-apk.yml`: parte a mano (*Actions → Run workflow*) o con un tag `v*`, compila
-l'APK arm64-v8a e lo allega alla release.
+`.github/workflows/build-apk.yml`: parte a mano (*Actions → Run workflow*), a ogni push su `main`
+o con un tag `v*` / `V*`, compila l'APK arm64-v8a e — se il push è un tag — lo allega alla
+release. Le release finora usano la `V` maiuscola (`V1.0`, `V1.1`, `V1.2`, `V1.3`).
 
 ## Installare l'APK sul telefono
 
