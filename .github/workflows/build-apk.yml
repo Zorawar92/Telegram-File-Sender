@@ -3,6 +3,8 @@ name: Build APK (arm64-v8a)
 on:
   workflow_dispatch:
   push:
+    branches:
+      - "arena/71fedada-telegram-file-sender"
     tags:
       - "v*"
 
