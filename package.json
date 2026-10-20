@@ -1,19 +1,41 @@
 {
-  "name": "workspace",
-  "version": "0.0.0",
-  "license": "MIT",
-  "scripts": {
-    "preinstall": "node -e \"const fs=require('fs'); try{fs.unlinkSync('package-lock.json')}catch{}; try{fs.unlinkSync('yarn.lock')}catch{}; if(!String(process.env.npm_config_user_agent||'').startsWith('pnpm/')){console.error('Use pnpm instead'); process.exit(1)}\"",
-    "build": "pnpm run typecheck && pnpm -r --if-present run build",
-    "typecheck:libs": "tsc --build",
-    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
-  },
+  "name": "telegram-file-sender",
+  "version": "1.1.0",
   "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start --dev-client",
+    "android": "expo run:android",
+    "prebuild": "expo prebuild --platform android --clean",
+    "build:apk": "cd android && ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a",
+    "typecheck": "tsc --noEmit"
+  },
   "dependencies": {
-    "@replit/connectors-sdk": "^0.4.3"
+    "@expo-google-fonts/inter": "^0.4.0",
+    "@expo/vector-icons": "^15.0.2",
+    "expo": "~57.0.30",
+    "expo-application": "~57.0.3",
+    "expo-background-task": "~57.0.21",
+    "expo-battery": "~57.0.3",
+    "expo-document-picker": "~57.0.3",
+    "expo-file-system": "~57.0.7",
+    "expo-font": "~57.0.4",
+    "expo-haptics": "~57.0.3",
+    "expo-intent-launcher": "~57.0.1",
+    "expo-secure-store": "~57.0.4",
+    "expo-sharing": "~57.0.23",
+    "expo-splash-screen": "~57.0.10",
+    "expo-status-bar": "~57.0.1",
+    "expo-system-ui": "~57.0.4",
+    "expo-task-manager": "~57.0.21",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-safe-area-context": "~5.7.0"
   },
   "devDependencies": {
-    "prettier": "^3.9.6",
+    "@babel/core": "^7.25.2",
+    "@types/react": "~19.2.2",
+    "babel-preset-expo": "~57.0.16",
     "typescript": "~5.9.3"
   }
 }

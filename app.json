@@ -1,0 +1,52 @@
+{
+  "expo": {
+    "name": "Telegram File Sender",
+    "slug": "telegram-file-sender",
+    "version": "1.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/telegram-file-sender-icon.png",
+    "scheme": "telegramfilesender",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#071522"
+    },
+    "ios": {
+      "supportsTablet": false
+    },
+    "android": {
+      "package": "com.zorawar.telegramfilesender",
+      "versionCode": 2,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/icon.png",
+        "backgroundColor": "#071522"
+      },
+      "permissions": [
+        "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.WAKE_LOCK"
+      ]
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-document-picker",
+      "expo-splash-screen",
+      [
+        "expo-sharing",
+        {
+          "android": {
+            "enabled": true,
+            "singleShareMimeTypes": [
+              "*/*"
+            ],
+            "multipleShareMimeTypes": [
+              "*/*"
+            ]
+          }
+        }
+      ]
+    ]
+  }
+}
