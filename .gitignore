@@ -9,6 +9,10 @@ android/build/
 android/local.properties
 *.keystore
 !release.keystore
+# la release usa la keystore di debug generata da Expo: serve per compilare da zero
+!android/app/debug.keystore
 android/app/.cxx/
 android/.kotlin/
 *.hprof
+modules/*/android/build/
+modules/*/android/.gradle/

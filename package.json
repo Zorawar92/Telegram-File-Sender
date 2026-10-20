@@ -1,6 +1,6 @@
 {
   "name": "telegram-file-sender",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "main": "index.js",
   "scripts": {
@@ -37,5 +37,12 @@
     "@types/react": "~19.2.2",
     "babel-preset-expo": "~57.0.16",
     "typescript": "~5.9.3"
+  },
+  "expo": {
+    "autolinking": {
+      "buildFromSource": [
+        "expo-background-task"
+      ]
+    }
   }
 }

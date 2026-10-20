@@ -1,0 +1,62 @@
+name: Build APK (arm64-v8a)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      # La cartella android/ è versionata: se la modifichi con `expo prebuild`,
+      # committa il risultato. Qui la rigeneriamo solo se manca.
+      - name: Prebuild (solo se android/ non esiste)
+        run: |
+          if [ ! -d android ]; then
+            npx expo prebuild --platform android --no-install
+          fi
+
+      - name: Build APK (solo arm64-v8a)
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a
+
+      - name: Rinomina APK
+        run: |
+          mkdir -p out
+          cp android/app/build/outputs/apk/release/app-release.apk \
+             out/telegram-file-sender-arm64-v8a.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: telegram-file-sender-arm64-v8a
+          path: out/telegram-file-sender-arm64-v8a.apk
+
+      # Allega l'APK alla release quando il push è un tag v*
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          files: out/telegram-file-sender-arm64-v8a.apk
