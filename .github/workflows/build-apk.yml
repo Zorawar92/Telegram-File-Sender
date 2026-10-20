@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - "main"
+      - "arena/ded7d25d-telegram-file-sender"
     tags:
       - "v*"
       - "V*"
